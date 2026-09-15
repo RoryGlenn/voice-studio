@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Voice Studio</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Voice Studio home"><span class="mark">v.</span><span><strong>Voice Studio</strong></span></a>
+    <div class="header-actions"><span class="local"><span></span> On your Mac</span><button id="quit" class="text-button">Quit studio</button></div>
+  </header>
+  <main>
+    <section class="intro">
+      <p class="eyebrow">YOUR WORDS. YOUR VOICE.</p>
+      <h1>Give your words a voice.</h1>
+      <p>Write a passage, find the right delivery, and make it yours.</p>
+    </section>
+    <div class="workspace">
+      <section class="card script-card" aria-labelledby="scriptHeading">
+        <div class="card-heading"><h2 id="scriptHeading">The script</h2><label class="text-button" for="fileInput">Import .txt<input id="fileInput" type="file" accept=".txt,text/plain" hidden></label></div>
+        <label class="sr-only" for="title">Recording title</label>
+        <input id="title" class="title-input" type="text" maxlength="100" placeholder="Untitled narration" value="A moment to notice">
+        <label class="sr-only" for="text">Text to narrate</label>
+        <textarea id="text" spellcheck="true" placeholder="Paste or write the text you want to hear…">Sometimes, the most useful thing we can do is slow down and notice what is already happening. A small change can travel further than we expect.
+
+Think of a garden after the rain. The soil holds the water, the roots draw it in, and the leaves turn toward the light. Nothing works entirely on its own.
+
+When we understand those connections, we can make better choices. We can be patient where patience helps, and act with confidence when the moment is right.</textarea>
+        <div class="text-meta"><span id="wordCount">0 words</span><span>English · blank lines create paragraph pauses</span></div>
+        <div class="actions"><button id="preview" class="button secondary">Preview first 120 words</button><button id="generate" class="button primary">Generate audio <span aria-hidden="true">↗</span></button></div>
+      </section>
+      <aside class="card delivery-card" aria-labelledby="deliveryHeading">
+        <div class="card-heading"><h2 id="deliveryHeading">The delivery</h2><span class="small-tag">SAVED VOICE</span></div>
+        <div class="voice"><div class="avatar" id="voice-avatar">V</div><div><strong id="voice-name">Your voice</strong><p>Your recorded voice reference</p></div><span class="wave" aria-hidden="true">▂▅▃▇▅▂</span></div>
+        <label for="engine">Voice version</label>
+        <select id="engine"><option value="natural">Natural · Higher precision</option><option value="expressive">Expressive · audition</option></select>
+        <p id="engineNote" class="help">Your selected default voice, using the new recording.</p>
+        <div id="expressionGroup" hidden>
+          <div class="control-label"><label for="expression">Expression intensity</label><output id="expressionValue" for="expression">0.50</output></div>
+          <input id="expression" type="range" min="0" max="1" step="0.05" value="0.5">
+          <div class="range-labels"><span>Restrained</span><span>Animated</span></div>
+          <p class="help">Changes expression during speech generation. May also affect pace. Listen to a preview first.</p>
+        </div>
+        <div class="control-label"><label for="speed">Playback pace</label><output id="speedValue" for="speed">1.00×</output></div>
+        <input id="speed" type="range" min="0.8" max="1.2" step="0.05" value="1">
+        <div class="range-labels"><span>Slower</span><span>Faster</span></div>
+        <p class="help">Optional tempo processing that preserves pitch. At 1×, the original timing is kept.</p>
+        <div class="control-label"><label for="pause">Paragraph pause</label><output id="pauseValue" for="pause">0.6 s</output></div>
+        <input id="pause" type="range" min="0" max="2000" step="100" value="600">
+        <div class="range-labels"><span>Continuous</span><span>Unhurried</span></div>
+        <div class="delivery-footer"><span aria-hidden="true">◉</span><p>Generated locally. Your text and voice stay on this Mac.</p></div>
+      </aside>
+    </div>
+    <section id="statusPanel" class="status-panel" hidden aria-live="polite">
+      <div class="status-top"><div><p id="statusTitle">Preparing your voice…</p><span id="statusDetail"></span></div><button id="cancel" class="text-button">Cancel render</button></div>
+      <progress id="progress" max="1" value="0" aria-label="Rendering progress"></progress>
+    </section>
+    <p id="error" class="error" role="alert" hidden></p>
+    <section class="recordings" aria-labelledby="recordingsHeading">
+      <div class="section-heading"><div><p class="eyebrow">MADE HERE</p><h2 id="recordingsHeading">Your recordings</h2></div><span id="recordingCount"></span></div>
+      <p id="empty" class="empty">Your first recording starts with a few words above.<br><span>Every completed render includes a WAV and an MP3.</span></p>
+      <div id="recordings"></div>
+    </section>
+    <footer>AI-generated speech from your saved voice · Listen before sharing · Up to 500,000 characters per render</footer>
+  </main>
+</body>
+</html>

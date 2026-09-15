@@ -1,0 +1,26 @@
+{
+  "name": "Your Voice",
+  "reference": "profile/reference.wav",
+  "reference_provenance": "profile/reference.json",
+  "reference_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "engines": {
+    "natural": {
+      "label": "Natural \u00b7 Higher precision",
+      "path": "work/own_voice/models/chatterbox-turbo-fp16",
+      "repository": "mlx-community/chatterbox-turbo-fp16",
+      "revision": "b2d0a13aa7cfff0a06d9acb247ae91c8f19a6d75"
+    },
+    "expressive": {
+      "label": "Expressive \u00b7 audition",
+      "path": "work/own_voice/models/chatterbox-4bit",
+      "repository": "mlx-community/chatterbox-4bit",
+      "revision": "f1d7b9696e1b6242e64eb8c4a823b6d1a50425a8"
+    }
+  },
+  "synthesis": {
+    "temperature": 0.8,
+    "seed": 20260905,
+    "repetition_penalty": 1.2,
+    "expressive_cfg_weight": 0.3
+  }
+}

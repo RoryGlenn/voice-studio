@@ -1,0 +1,5 @@
+# Copy to local.toml (ignored by Git); all paths are relative to that file.
+workspace_root = "data"
+studio_data_dir = "data/studio"
+# Existing installations can reuse their current Python environment:
+# python = "/path/to/existing/environment/bin/python"

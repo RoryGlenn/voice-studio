@@ -1,0 +1,31 @@
+[project]
+name = "voice-studio"
+version = "0.1.0"
+description = "Local saved-voice narration and verified audiobook workflows"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "numpy==2.5.2",
+  "soundfile==0.14.0",
+  "spacy==3.8.16",
+  "transformers==5.16.1",
+  "mutagen==1.48.1",
+]
+
+[project.optional-dependencies]
+native = [
+  "mlx==0.32.2; sys_platform == 'darwin' and platform_machine == 'arm64'",
+  "mlx-audio==0.5.1; sys_platform == 'darwin' and platform_machine == 'arm64'",
+  "mlx-whisper==0.4.3; sys_platform == 'darwin' and platform_machine == 'arm64'",
+  "torch==2.14.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
+]
+
+[tool.uv]
+package = false
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+ignore = ["E501"]
+
+[tool.mypy]
+ignore_missing_imports = true
+follow_imports = "silent"
