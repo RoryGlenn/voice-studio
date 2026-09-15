@@ -15,6 +15,7 @@ outputs/
 state/
 renders/
 profile/
+voices/
 models/
 *.wav
 *.mp3

@@ -1,0 +1,26 @@
+{
+  "name": "Deep Narrator",
+  "description": "Original synthetic narrator \u00b7 warm, low American delivery",
+  "reference": "profile/deep-narrator.wav",
+  "reference_provenance": "profile/deep-narrator.provenance.json",
+  "reference_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "engines": {
+    "natural": {
+      "label": "Natural \u00b7 Higher precision",
+      "path": "work/own_voice/models/chatterbox-turbo-fp16",
+      "repository": "mlx-community/chatterbox-turbo-fp16",
+      "revision": "b2d0a13aa7cfff0a06d9acb247ae91c8f19a6d75"
+    }
+  },
+  "synthesis": {
+    "temperature": 0.8,
+    "seed": 20260915,
+    "repetition_penalty": 1.2,
+    "expressive_cfg_weight": 0.3
+  },
+  "reference_kind": "synthetic",
+  "notes": [
+    "Distinct synthetic voice from a blend of Kokoro stock American voices; no named-person recording used.",
+    "Initial audition uses the higher-precision unquantized Natural engine."
+  ]
+}

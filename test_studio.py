@@ -127,6 +127,10 @@ class RenderTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.directory = Path(self.temp.name)
         profile = synthetic_profile()
+        reference = self.directory / profile["reference"]
+        reference.parent.mkdir(parents=True)
+        reference.write_bytes(b"synthetic test reference")
+        profile["reference_sha256"] = studio.sha256(reference.read_bytes())
         (self.directory / "voice_profile.json").write_text(json.dumps(profile))
         self.service = studio.Studio(self.directory, FakeEngine)
         self.original_config = self.service.config
@@ -169,6 +173,8 @@ class RenderTests(unittest.TestCase):
         )
         folder = self.service.renders / job["id"]
         audio, rate = sf.read(folder / "narration.wav")
+        self.assertEqual(sf.info(folder / "narration.wav").subtype, "PCM_24")
+        self.assertEqual(result["wav_bit_depth"], 24)
         self.assertEqual(rate, studio.RATE)
         self.assertEqual(len(audio), round(2.6 * rate))
         self.assertTrue(np.all(audio[rate : round(1.6 * rate)] == 0))
