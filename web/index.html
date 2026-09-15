@@ -34,7 +34,9 @@ When we understand those connections, we can make better choices. We can be pati
       </section>
       <aside class="card delivery-card" aria-labelledby="deliveryHeading">
         <div class="card-heading"><h2 id="deliveryHeading">The delivery</h2><span class="small-tag">SAVED VOICE</span></div>
-        <div class="voice"><div class="avatar" id="voice-avatar">V</div><div><strong id="voice-name">Your voice</strong><p>Your recorded voice reference</p></div><span class="wave" aria-hidden="true">▂▅▃▇▅▂</span></div>
+        <label for="voice">Narrator</label>
+        <select id="voice"><option value="default">Your voice</option></select>
+        <div class="voice"><div class="avatar" id="voice-avatar">V</div><div><strong id="voice-name">Your voice</strong><p id="voice-description">Saved voice reference</p></div><span class="wave" aria-hidden="true">▂▅▃▇▅▂</span></div>
         <label for="engine">Voice version</label>
         <select id="engine"><option value="natural">Natural · Higher precision</option><option value="expressive">Expressive · audition</option></select>
         <p id="engineNote" class="help">Your selected default voice, using the new recording.</p>

@@ -4,6 +4,8 @@ Local saved-voice narration with a browser interface, MP3/WAV export, and the ex
 
 The website accepts text, previews or renders it, and exposes speed, paragraph pauses, and engine-specific expression controls. One worker owns model loading and generation. Natural uses the approved higher-precision checkpoint; its repository is named `chatterbox-turbo-fp16`, although the inspected weights are F32.
 
+New WAV downloads preserve the model's native 24 kHz audio as uncompressed 24-bit PCM. MP3 remains available for smaller files. Extra export bit depth preserves precision; it does not create higher-frequency detail or guarantee more natural synthesis.
+
 ## Existing installation
 
 The ignored `local.toml` selects your existing Python environment, voice profile, model cache, and audiobook workspace. Media stays in its current location. From this repository:
@@ -18,6 +20,18 @@ python3 run.py book verify
 On macOS, double-click `Launch Voice Studio.command` to open the website. Its launch URL contains the current local session token; use that URL when opening another browser. The token is stored only in the private runtime state. The server binds to `127.0.0.1` and is started on demand.
 
 The old and extracted launchers use the same instance lock when configured with the same Studio data directory. If the existing server is already running, launching here reopens that instance. To switch to the extracted server, finish any active render and quit the existing server first. The existing installation and completed audiobooks are preserved.
+
+## Narrator selection
+
+The Narrator menu selects a saved voice independently of its voice engine. The original `voice_profile.json` remains the default, with the stable ID `default`. Optional profiles live in the private Studio data directory at `voices/<voice-id>.json`; IDs use lowercase letters, digits, underscores, or hyphens. Restart the app after adding a profile. Every profile's reference path is relative to the Studio data directory, even when its JSON is inside `voices/`.
+
+`config/deep-narrator.example.json` is an optional synthetic-voice profile template, not a bundled or enabled narrator. Copy the template into your private `voices/` directory under your chosen voice ID, then supply the reference audio, its actual SHA-256, and the model path. The template defines one Natural engine; list only the engines you want available for that voice. A missing reference or model disables the corresponding voice/engine.
+
+The Narrator menu reflects the profiles in your local data directory. To remove an optional narrator, move its profile out of `voices/` and restart the app. Existing recordings retain the voice identity saved when they were generated. Reference audio, local profiles, models, and generation evidence stay outside the source repository.
+
+Profiles may set `default_engine` and `default_expression`. Selecting a voice applies these settings; API requests that omit them use the same defaults. Explicit request settings still take precedence, and reconnecting the browser preserves its current manual selection. An unavailable configured default disables rendering until the user chooses an available engine; the app does not silently substitute another model. Profiles without these fields retain Natural and expression 0.5 (or their sole defined engine).
+
+API clients can send `voice_id` in a render request. Omitting it preserves the original default. `/api/config` keeps its legacy default `voice`/`engines` fields and adds `default_voice_id` and a `voices` map. Jobs freeze the selected name, reference hash, model, and synthesis settings at submission. Recording labels and MP3 metadata come from that saved identity. Changing the selected speaker or conditioning parameters reloads conditioning inside the one render worker; cached audio conditioning is never shared across different voice identities.
 
 ## Clean environment
 
@@ -76,7 +90,7 @@ uv run python -m unittest discover -p 'test_*.py'
 node --test test_web.cjs
 uvx ruff check .
 uvx ruff format --check .
-uvx mypy --python-executable .venv/bin/python studio.py project_paths.py run.py
+uvx mypy --python-executable .venv/bin/python studio.py voice_profiles.py project_paths.py run.py
 ```
 
 Tests use fake tone generation and real audio encoding. They establish plumbing and verification behavior; automated recognition does not guarantee flawless pronunciation or replace listening review. No production speech generation is triggered by the default tests.

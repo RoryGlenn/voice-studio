@@ -43,18 +43,64 @@ function error(message = '', isConnectionError = false) {
   $('error').hidden = !message;
 }
 
+let voices = {};
+let defaultVoiceId = 'default';
+let activeVoiceId = null;
+
+function chooseVoice() {
+  const selected = voices[$('voice').value];
+  $('voice-name').textContent = selected?.name || 'Your voice';
+  $('voice-avatar').textContent = (selected?.name || 'V').slice(0, 1).toUpperCase();
+  $('voice-description').textContent = selected?.description || 'Saved voice reference';
+  for (const option of $('engine').options) {
+    const engine = selected?.engines[option.value];
+    option.disabled = !engine?.available;
+    if (engine) option.textContent = engine.label;
+  }
+  const changedVoice = activeVoiceId !== $('voice').value;
+  if (changedVoice || !Object.hasOwn(selected?.engines || {}, $('engine').value)) {
+    const fallback = selected?.engines.natural ? 'natural' : Object.keys(selected?.engines || {})[0];
+    $('engine').value = selected?.default_engine || fallback || '';
+  }
+  if (changedVoice) {
+    $('expression').value = selected?.default_expression ?? .5;
+  }
+  activeVoiceId = $('voice').value;
+  controls();
+}
+
+function configureVoices(config) {
+  defaultVoiceId = config.default_voice_id || 'default';
+  voices = config.voices || {[defaultVoiceId]: {name: config.voice || 'Your voice', engines: config.engines,
+    default_engine: config.default_engine, default_expression: config.default_expression}};
+  const previous = $('voice').value;
+  const options = Object.entries(voices).map(([id, voice]) => {
+    const option = document.createElement('option');
+    option.value = id;
+    option.textContent = voice.name;
+    option.disabled = !Object.values(voice.engines).some((engine) => engine.available);
+    return option;
+  });
+  $('voice').replaceChildren(...options);
+  $('voice').value = Object.hasOwn(voices, previous) ? previous : defaultVoiceId;
+  chooseVoice();
+}
+
 function controls() {
   $('expressionGroup').hidden = $('engine').value !== 'expressive';
   $('engineNote').textContent = $('engine').value === 'expressive'
     ? 'A different model using your same voice reference. Its tone still needs your listening feedback.'
-    : 'Your selected default voice, using the new recording.';
+    : 'Natural delivery using the selected saved voice.';
   $('speedValue').textContent = Number($('speed').value).toFixed(2) + '×';
   $('pauseValue').textContent = (Number($('pause').value) / 1000).toFixed(1) + ' s';
   $('expressionValue').textContent = Number($('expression').value).toFixed(2);
   const text = $('text').value.trim();
   const words = text ? text.split(/\s+/u).length : 0;
   $('wordCount').textContent = `${words.toLocaleString()} words · ${$('text').value.length.toLocaleString()} characters`;
-  const disabled = !connected || !text || Boolean(activeId) || submitting;
+  const available = voices[$('voice').value]?.engines[$('engine').value]?.available;
+  const disabled = !connected || !text || !available || Boolean(activeId) || submitting;
+  $('voice').disabled = Boolean(activeId) || submitting;
+  $('engine').disabled = Boolean(activeId) || submitting;
   $('generate').disabled = disabled;
   $('preview').disabled = disabled;
   $('quit').disabled = !connected || Boolean(activeId) || submitting;
@@ -91,7 +137,7 @@ function recordings(jobs) {
     const details = document.createElement('p');
     details.className = 'details';
     const voice = job.engine === 'natural' ? 'Natural voice' : `Expression ${job.settings.expression.toFixed(2)} · audition`;
-    const description = `${job.mode === 'preview' ? 'Preview' : 'Full recording'} · ${voice} · ${job.settings.speed.toFixed(2)}×`;
+    const description = `${job.voice_name || 'Earlier saved voice'} · ${job.mode === 'preview' ? 'Preview' : 'Full recording'} · ${voice} · ${job.settings.speed.toFixed(2)}×`;
     details.textContent = job.status === 'completed'
       ? `${duration(job.audio_seconds)} · ${job.words} words · ${description} · Made in ${duration(job.elapsed_seconds)}`
       : `${description} · ${job.status === 'cancelled' ? 'Cancelled' : 'Failed'}`;
@@ -142,7 +188,7 @@ function progress(job) {
     : 'Cancel render';
   const stages = {queued: 'Preparing your recording…', loading: 'Loading your voice…', rendering: 'Giving your words a voice…', encoding: 'Preparing your audio files…'};
   $('statusTitle').textContent = stages[job.status] || 'Working…';
-  $('statusDetail').textContent = `${job.title} · ${job.completed_passages} of ${job.total_passages} passages · ${duration(job.audio_seconds)} of audio`;
+  $('statusDetail').textContent = `${job.voice_name || 'Saved voice'} · ${job.title} · ${job.completed_passages} of ${job.total_passages} passages · ${duration(job.audio_seconds)} of audio`;
   $('progress').max = job.total_passages;
   $('progress').value = job.completed_passages;
   controls();
@@ -172,7 +218,7 @@ async function submit(mode) {
   submitting = true;
   controls();
   const data = {text: $('text').value, title: $('title').value || 'Untitled narration', mode,
-    engine: $('engine').value, speed: Number($('speed').value), paragraph_pause_ms: Number($('pause').value)};
+    voice_id: $('voice').value, engine: $('engine').value, speed: Number($('speed').value), paragraph_pause_ms: Number($('pause').value)};
   if (data.engine === 'expressive') data.expression = Number($('expression').value);
   try {
     const job = await api('/api/jobs', data);
@@ -185,6 +231,7 @@ async function submit(mode) {
 }
 
 for (const id of ['text', 'engine', 'speed', 'pause', 'expression']) $(id).addEventListener('input', controls);
+$('voice').addEventListener('change', chooseVoice);
 $('preview').addEventListener('click', () => submit('preview'));
 $('generate').addEventListener('click', () => submit('full'));
 $('quit').addEventListener('click', async () => {
@@ -231,14 +278,8 @@ async function init() {
       $('recordings').replaceChildren();
     }
     const config = await api('/api/config');
-    $('voice-name').textContent = config.voice || 'Your voice';
-    $('voice-avatar').textContent = (config.voice || 'V').slice(0, 1).toUpperCase();
+    configureVoices(config);
     rememberToken();
-    for (const option of $('engine').options) {
-      const engine = config.engines[option.value];
-      option.disabled = !engine?.available;
-      if (engine) option.textContent = engine.label;
-    }
     connected = true;
     if (connectionError) error();
     controls();

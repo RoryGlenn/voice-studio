@@ -32,6 +32,13 @@ import numpy as np
 import soundfile as sf
 
 from project_paths import studio_data_dir, workspace_root
+from voice_profiles import (
+    DEFAULT_VOICE_ID,
+    engine_capabilities,
+    load_profiles,
+    profile_defaults,
+    profile_identity,
+)
 
 APP = Path(__file__).resolve().parent
 WORKSPACE = workspace_root()
@@ -105,7 +112,13 @@ def split_text(text: str) -> list[dict[str, Any]]:
     return chunks
 
 
-def validate_request(data: Any, engines: dict[str, Any]) -> dict[str, Any]:
+def validate_request(
+    data: Any,
+    engines: dict[str, Any],
+    *,
+    default_engine: str = "natural",
+    default_expression: float = 0.5,
+) -> dict[str, Any]:
     """Validate supported user controls and return explicit synthesis settings."""
     allowed = {
         "text",
@@ -115,11 +128,17 @@ def validate_request(data: Any, engines: dict[str, Any]) -> dict[str, Any]:
         "expression",
         "speed",
         "paragraph_pause_ms",
+        "voice_id",
     }
     if not isinstance(data, dict) or set(data) - allowed:
         raise ValueError(
             "Request must contain only supported text and delivery settings."
         )
+    voice_id = data.get("voice_id", DEFAULT_VOICE_ID)
+    if not isinstance(voice_id, str) or not re.fullmatch(
+        r"[a-z0-9][a-z0-9_-]{0,63}", voice_id
+    ):
+        raise ValueError("Choose a valid saved voice.")
     text = data.get("text")
     if not isinstance(text, str) or not text.strip() or len(text) > MAX_TEXT:
         raise ValueError(f"Enter between 1 and {MAX_TEXT:,} characters of text.")
@@ -132,7 +151,7 @@ def validate_request(data: Any, engines: dict[str, Any]) -> dict[str, Any]:
         or any(ord(c) < 32 for c in title)
     ):
         raise ValueError("Use a title of at most 100 characters, without line breaks.")
-    engine = data.get("engine", "natural")
+    engine = data.get("engine", default_engine)
     if (
         not isinstance(engine, str)
         or engine not in engines
@@ -146,7 +165,7 @@ def validate_request(data: Any, engines: dict[str, Any]) -> dict[str, Any]:
     for key, default, minimum, maximum in (
         ("speed", 1.0, 0.8, 1.2),
         ("paragraph_pause_ms", 600, 0, 2000),
-        ("expression", 0.5, 0.0, 1.0),
+        ("expression", default_expression, 0.0, 1.0),
     ):
         value = data.get(key, default)
         if (
@@ -174,6 +193,7 @@ def validate_request(data: Any, engines: dict[str, Any]) -> dict[str, Any]:
         "title": title.strip() or "Untitled narration",
         "engine": engine,
         "mode": mode,
+        "voice_id": voice_id,
         **values,
     }
 
@@ -187,7 +207,7 @@ class NativeEngine:
         root: Path | None = None,
         reference_dir: Path | None = None,
     ) -> None:
-        self.profile = profile
+        self.profile = copy.deepcopy(profile)
         self.root = root if root is not None else workspace_root()
         self.reference_dir = (
             reference_dir if reference_dir is not None else studio_data_dir()
@@ -195,6 +215,11 @@ class NativeEngine:
         self.model: Any = None
         self.conds: Any = None
         self.key: str | None = None
+        self.cache_identity: str | None = None
+
+    def select_profile(self, profile: dict[str, Any]) -> None:
+        """Select a detached job profile inside the single render worker."""
+        self.profile = copy.deepcopy(profile)
 
     def prepare(self, key: str, expression: float) -> float:
         """Load a model only when changed, then prepare the saved reference."""
@@ -207,28 +232,48 @@ class NativeEngine:
         from mlx_audio.tts.utils import load_model
 
         started = time.monotonic()
-        if self.key != key:
+        reference = self.reference_dir / self.profile["reference"]
+        model_path = self.root / self.profile["engines"][key]["path"]
+        identity = profile_identity(
+            {
+                "engine": key,
+                "model": self.profile["engines"][key],
+                "model_path": str(model_path.resolve()),
+                "reference_path": str(reference.resolve()),
+                "reference_sha256": self.profile["reference_sha256"],
+                "conditioning_expression": expression if key == "expressive" else None,
+            }
+        )
+        if self.cache_identity != identity:
             self.conds = None
             self.model = None
             self.key = None
+            self.cache_identity = None
             gc.collect()
             mx.clear_cache()
-            reference = self.reference_dir / self.profile["reference"]
+        try:
             if sha256(reference.read_bytes()) != self.profile["reference_sha256"]:
                 raise ValueError(
-                    "The saved voice reference changed; restore it before rendering."
+                    "The selected voice reference changed; restore it before rendering."
                 )
-            model_path = self.root / self.profile["engines"][key]["path"]
-            self.model = load_model(str(model_path))
-            if key == "natural":
-                self.model.prepare_conditionals(str(reference))
-            else:
-                self.conds = self.model.prepare_conditionals(
-                    str(reference),
-                    ref_sr=RATE,
-                    exaggeration=expression,
-                )
-            self.key = key
+            if self.cache_identity != identity:
+                self.model = load_model(str(model_path))
+                if key == "natural":
+                    self.model.prepare_conditionals(str(reference))
+                else:
+                    self.conds = self.model.prepare_conditionals(
+                        str(reference), ref_sr=RATE, exaggeration=expression
+                    )
+                self.key = key
+                self.cache_identity = identity
+        except Exception:
+            self.conds = None
+            self.model = None
+            self.key = None
+            self.cache_identity = None
+            gc.collect()
+            mx.clear_cache()
+            raise
         mx.random.seed(self.profile["synthesis"]["seed"])
         return time.monotonic() - started
 
@@ -310,7 +355,8 @@ class Studio:
         self.directory = directory
         self.workspace = workspace if workspace is not None else workspace_root()
         self.web_directory = web_directory if web_directory is not None else APP / "web"
-        self.profile = json.loads((directory / "voice_profile.json").read_text())
+        self.profiles = load_profiles(directory)
+        self.profile = self.profiles[DEFAULT_VOICE_ID]
         self.renders = directory / "renders"
         self.renders.mkdir(exist_ok=True)
         self.ffmpeg = shutil.which("ffmpeg") or "/opt/homebrew/bin/ffmpeg"
@@ -323,6 +369,8 @@ class Studio:
             if engine_factory is NativeEngine
             else engine_factory(self.profile)
         )
+        self.engine_factory = engine_factory
+        self.engine_profile_identity = profile_identity(self.profile)
         self.pool = concurrent.futures.ThreadPoolExecutor(
             max_workers=1, thread_name_prefix="voice"
         )
@@ -348,18 +396,21 @@ class Studio:
 
     def config(self) -> dict[str, Any]:
         """Return public voice capabilities without disclosing filesystem paths."""
-        engines = {}
-        for key, value in self.profile["engines"].items():
-            path = self.workspace / value["path"]
-            engines[key] = {
-                "label": value["label"],
-                "available": (path / "config.json").is_file()
-                and any(path.glob("*.safetensors")),
-                "expression": key == "expressive",
+        voices = {
+            key: {
+                "name": profile["name"],
+                "description": profile.get("description", "Saved voice reference"),
+                "engines": engine_capabilities(profile, self.workspace, self.directory),
+                **profile_defaults(profile),
             }
+            for key, profile in self.profiles.items()
+        }
         return {
             "voice": self.profile["name"],
-            "engines": engines,
+            "engines": voices[DEFAULT_VOICE_ID]["engines"],
+            "default_voice_id": DEFAULT_VOICE_ID,
+            **profile_defaults(self.profile),
+            "voices": voices,
             "max_text": MAX_TEXT,
             "preview_words": 120,
             "active": self.active,
@@ -384,7 +435,21 @@ class Studio:
 
     def submit(self, data: Any) -> dict[str, Any]:
         """Validate text, reserve the worker, and start a single render request."""
-        settings = validate_request(data, self.config()["engines"])
+        if not isinstance(data, dict):
+            raise ValueError(
+                "Request must contain supported text and delivery settings."
+            )
+        voice_id = data.get("voice_id", DEFAULT_VOICE_ID)
+        if not isinstance(voice_id, str) or voice_id not in self.profiles:
+            raise ValueError("That saved voice is unavailable.")
+        profile = copy.deepcopy(self.profiles[voice_id])
+        config = self.config()
+        engines = (
+            config["engines"]
+            if voice_id == DEFAULT_VOICE_ID
+            else config["voices"][voice_id]["engines"]
+        )
+        settings = validate_request(data, engines, **profile_defaults(profile))
         chunks = split_text(settings["rendered_text"])
         with self.lock:
             if self.stopping:
@@ -410,6 +475,10 @@ class Studio:
                 "created_at": time.time(),
                 "updated_at": time.time(),
                 "engine": settings["engine"],
+                "voice_id": voice_id,
+                "voice_name": profile["name"],
+                "voice_profile_sha256": profile_identity(profile),
+                "synthesis": copy.deepcopy(profile["synthesis"]),
                 "settings": {
                     k: v
                     for k, v in settings.items()
@@ -417,8 +486,8 @@ class Studio:
                 },
                 "input_sha256": sha256(settings["text"].encode()),
                 "spoken_sha256": sha256(settings["rendered_text"].encode()),
-                "reference_sha256": self.profile["reference_sha256"],
-                "model": self.profile["engines"][settings["engine"]],
+                "reference_sha256": profile["reference_sha256"],
+                "model": copy.deepcopy(profile["engines"][settings["engine"]]),
                 "words": len(settings["rendered_text"].split()),
                 "total_passages": len(chunks),
                 "completed_passages": 0,
@@ -431,7 +500,7 @@ class Studio:
             save_json(folder / "manifest.json", job)
             self.active = job_id
             self.cancel_event.clear()
-            self.pool.submit(self._render, job_id, settings, chunks)
+            self.pool.submit(self._render, job_id, settings, chunks, profile)
             return copy.deepcopy(job)
 
     def cancel(self, job_id: str) -> dict[str, Any]:
@@ -484,7 +553,11 @@ class Studio:
                         process.wait(timeout=3)
 
     def _render(
-        self, job_id: str, settings: dict[str, Any], chunks: list[dict[str, Any]]
+        self,
+        job_id: str,
+        settings: dict[str, Any],
+        chunks: list[dict[str, Any]],
+        profile: dict[str, Any],
     ) -> None:
         """Synthesize and export one request, without holding the HTTP thread."""
         folder = self.renders / job_id
@@ -494,6 +567,13 @@ class Studio:
         try:
             self._check_cancel()
             self.update(job_id, status="loading")
+            selected_identity = profile_identity(profile)
+            if self.engine_profile_identity != selected_identity:
+                if isinstance(self.engine, NativeEngine):
+                    self.engine.select_profile(profile)
+                else:
+                    self.engine = self.engine_factory(copy.deepcopy(profile))
+                self.engine_profile_identity = selected_identity
             load_seconds = self.engine.prepare(
                 settings["engine"], settings["expression"]
             )
@@ -504,7 +584,7 @@ class Studio:
                 "w",
                 samplerate=RATE,
                 channels=1,
-                subtype="PCM_16",
+                subtype="PCM_24",
             ) as output:
                 for index, chunk in enumerate(chunks):
                     self._check_cancel()
@@ -581,9 +661,9 @@ class Studio:
                     "-metadata",
                     f"title={settings['title']}",
                     "-metadata",
-                    f"artist={self.profile['name']} (AI-generated voice)",
+                    f"artist={profile['name']} (AI-generated voice)",
                     "-metadata",
-                    "comment=AI-generated speech using the user's saved voice reference",
+                    "comment=AI-generated speech using the selected saved voice reference",
                     "-y",
                     str(folder / "narration.partial.mp3"),
                 ]
@@ -620,6 +700,7 @@ class Studio:
                     status="completed",
                     files=files,
                     sample_rate=RATE,
+                    wav_bit_depth=24,
                     elapsed_seconds=time.monotonic() - started,
                     cancelling=False,
                 )
