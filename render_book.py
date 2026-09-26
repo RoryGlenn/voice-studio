@@ -18,6 +18,7 @@ from typing import Any
 import numpy as np
 import soundfile as sf
 
+import runtime
 from project_paths import workspace_root
 
 ROOT = workspace_root()
@@ -244,6 +245,8 @@ def build_plan() -> dict[str, Any]:
         },
         "postprocessing": "loudness normalization only; mono24kHz128kbpsMP3",
     }
+    if runtime.settings()["backend"] == "cuda":
+        identity["runtime"] = runtime.identity()
     if MODEL_FILES_SHA256 is not None:
         identity["model_files_sha256"] = dict(MODEL_FILES_SHA256)
     if PEAK_ONLY:
@@ -421,24 +424,40 @@ def compare(expected: str, actual: str, strict: bool = False) -> dict[str, Any]:
     }
 
 
+@runtime.gpu_operation
 def recognize(path: Path, model_path: Path) -> tuple[str, float]:
     """Transcribe an original generated passage without prompting expected text."""
+    runtime.release_models()
+    mx = runtime.initialize(ROOT)
     import mlx_whisper
 
     started = time.monotonic()
-    result = mlx_whisper.transcribe(
-        str(path),
-        path_or_hf_repo=str(model_path),
-        language="en",
-        task="transcribe",
-        temperature=0.0,
-        condition_on_previous_text=False,
-        initial_prompt=None,
-        word_timestamps=False,
-        fp16=True,
-        verbose=None,
-    )
-    return result["text"], time.monotonic() - started
+    try:
+        result = mlx_whisper.transcribe(
+            str(path),
+            path_or_hf_repo=str(model_path),
+            language="en",
+            task="transcribe",
+            temperature=0.0,
+            condition_on_previous_text=False,
+            initial_prompt=None,
+            word_timestamps=False,
+            fp16=True,
+            verbose=None,
+        )
+        return result["text"], time.monotonic() - started
+    finally:
+        import gc
+        import importlib
+
+        holder = getattr(
+            importlib.import_module("mlx_whisper.transcribe"), "ModelHolder", None
+        )
+        if holder is not None:
+            holder.model = None
+            holder.model_path = None
+        gc.collect()
+        mx.clear_cache()
 
 
 def render_segment(
@@ -471,6 +490,8 @@ def render_segment(
 
     attempts = []
     for attempt in range(3):
+        if isinstance(model, runtime.ReloadableModel):
+            model.prepare()
         mx.random.seed(
             20260905 + track["track"] * 10000 + segment["number"] + attempt * 1000000
         )
@@ -699,6 +720,7 @@ def publish_navigation(completed: list[dict[str, Any]]) -> None:
     save_json(OUTPUT / "Track guide.json", complete)
 
 
+@runtime.gpu_operation
 def main() -> None:
     """Run a resumable local rendering pass and write progress after each passage."""
     parser = argparse.ArgumentParser()
@@ -735,10 +757,8 @@ def main() -> None:
             )
         )
         return
-    from mlx_audio.tts.utils import load_model
-
-    model = load_model(str(MODEL))
-    model.prepare_conditionals(str(REFERENCE))
+    runtime.initialize(ROOT)
+    model = runtime.ReloadableModel(MODEL, REFERENCE, ROOT)
     completed_path = JOB / "completed_tracks.json"
     completed = (
         json.loads(completed_path.read_text()) if completed_path.exists() else []

@@ -9,6 +9,7 @@ dependencies = [
   "spacy==3.8.16",
   "transformers==5.16.1",
   "mutagen==1.48.1",
+  "pillow==12.1.1",
 ]
 
 [project.optional-dependencies]
@@ -17,6 +18,16 @@ native = [
   "mlx-audio==0.5.1; sys_platform == 'darwin' and platform_machine == 'arm64'",
   "mlx-whisper==0.4.3; sys_platform == 'darwin' and platform_machine == 'arm64'",
   "torch==2.14.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
+]
+
+ubuntu = [
+  "mlx[cuda12]==0.32.2; sys_platform == 'linux' and platform_machine == 'x86_64'",
+  "mlx-audio==0.5.1; sys_platform == 'linux' and platform_machine == 'x86_64'",
+  "mlx-whisper==0.4.3; sys_platform == 'linux' and platform_machine == 'x86_64'",
+  "torch==2.14.0; sys_platform == 'linux' and platform_machine == 'x86_64'",
+  "nvidia-cuda-runtime-cu12==12.9.79; sys_platform == 'linux'",
+  "nvidia-cuda-nvcc-cu12==12.9.86; sys_platform == 'linux'",
+  "nvidia-cuda-cccl-cu12==12.9.27; sys_platform == 'linux'",
 ]
 
 [tool.uv]

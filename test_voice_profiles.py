@@ -80,6 +80,47 @@ class RegistryChecks(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "duplicate voice ID"):
                 load_profiles(directory)
 
+    def test_native_capabilities_require_primary_weights_and_text_tokenizer(
+        self,
+    ) -> None:
+        with (
+            tempfile.TemporaryDirectory() as temp,
+            patch("runtime.prerequisites", return_value=None),
+        ):
+            root = Path(temp)
+            profile = write_profile(root, "default", "Example")
+            model = root / profile["engines"]["natural"]["path"]
+            model.mkdir(parents=True)
+            for name in (
+                "config.json",
+                "conds.safetensors",
+                "vocab.json",
+                "merges.txt",
+                "tokenizer_config.json",
+            ):
+                (model / name).write_bytes(b"synthetic presence fixture")
+            self.assertFalse(
+                engine_capabilities(profile, root, root)["natural"]["available"]
+            )
+            (model / "model.safetensors").write_bytes(b"primary weights")
+            self.assertTrue(
+                engine_capabilities(profile, root, root)["natural"]["available"]
+            )
+            (model / "merges.txt").unlink()
+            self.assertFalse(
+                engine_capabilities(profile, root, root)["natural"]["available"]
+            )
+            (model / "tokenizer.json").write_text("{}")
+            self.assertTrue(
+                engine_capabilities(profile, root, root)["natural"]["available"]
+            )
+            with patch(
+                "runtime.prerequisites", return_value="Missing offline S3TokenizerV2"
+            ):
+                self.assertFalse(
+                    engine_capabilities(profile, root, root)["natural"]["available"]
+                )
+
 
 class NativeCacheChecks(unittest.TestCase):
     """Use mocked native modules to detect reuse of the wrong speaker conditioning."""
@@ -93,6 +134,8 @@ class NativeCacheChecks(unittest.TestCase):
         self.enterContext(patch.dict(os.environ))
         self.mx = types.ModuleType("mlx.core")
         self.mx.clear_cache = Mock()
+        self.mx.synchronize = Mock()
+        self.enterContext(patch("runtime.cuda_device_synchronize"))
         self.mx.random = types.SimpleNamespace(seed=Mock())
         mlx = types.ModuleType("mlx")
         mlx.core = self.mx
@@ -120,6 +163,14 @@ class NativeCacheChecks(unittest.TestCase):
                     "mlx_audio.tts": tts,
                     "mlx_audio.tts.utils": utils,
                 },
+            )
+        )
+        self.enterContext(patch("runtime.initialize", return_value=self.mx))
+        self.enterContext(patch("runtime.check_tokenizer", return_value={}))
+        self.enterContext(
+            patch(
+                "runtime.load_checked_model",
+                side_effect=lambda path: self.loader(str(path)),
             )
         )
         self.engine = studio.NativeEngine(self.a, self.directory, self.directory)

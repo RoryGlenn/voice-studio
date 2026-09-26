@@ -1,6 +1,6 @@
 # Voice Studio
 
-Local saved-voice narration with a browser interface, MP3/WAV export, and the existing verified *Thinking in Systems* audiobook workflow.
+Local saved-voice narration with a browser interface, MP3/WAV export, and resumable EPUB-to-audiobook jobs on Apple Silicon macOS and NVIDIA Ubuntu. The historical *Thinking in Systems* workflow remains available.
 
 The website accepts text, previews or renders it, and exposes speed, paragraph pauses, and engine-specific expression controls. One worker owns model loading and generation. Natural uses the approved higher-precision checkpoint; its repository is named `chatterbox-turbo-fp16`, although the inspected weights are F32.
 
@@ -35,7 +35,7 @@ API clients can send `voice_id` in a render request. Omitting it preserves the o
 
 ## Clean environment
 
-Use Python 3.12, uv, FFmpeg/ffprobe, and Node for browser tests. The inference backend requires an Apple Silicon Mac; CPU tests do not require a voice model or a book.
+Use Python 3.12, uv, FFmpeg/ffprobe, and Node for browser tests. Native inference uses MLX Metal on Apple Silicon or MLX CUDA 12 on Linux x86-64 with a supported NVIDIA GPU. CPU tests do not require a voice model or a book.
 
 ```sh
 uv sync --locked
@@ -63,13 +63,85 @@ Configuration precedence is environment variable, then local TOML, then an ignor
 
 `VOICE_STUDIO_CONFIG` selects an alternative TOML file. Relative paths resolve beside that configuration file. `studio.py` also accepts `--data-dir` and `--workspace` for explicit runtime locations.
 
+## Ubuntu installation
+
+Use Python 3.12, `uv`, FFmpeg, and an NVIDIA driver compatible with CUDA 12. The tested target is Ubuntu 24.04 with an RTX 3060 Ti (8 GiB VRAM). Install the OS encoder utilities, then the locked Python profile:
+
+```sh
+sudo apt-get update
+sudo apt-get install ffmpeg
+uv sync --locked --extra ubuntu
+cp local.example.toml local.toml
+```
+
+Configure the external workspace and Studio profile directory in `local.toml`, copy your private voice profiles and reference audio with checksum verification, and install the exact model snapshots named by those profiles. Do not copy the Mac Python environment. The `ubuntu` extra includes the CUDA runtime, NVCC header, and CCCL header packages needed by MLX kernel compilation.
+
+The offline Hugging Face cache belongs at `<workspace>/work/hf-narration-cache`. It must include `mlx-community/S3TokenizerV2` revision `e0c9886f0e1c35ae85b1f27277416fb19fc72bec`, whose `model.safetensors` SHA-256 is `928726bc1f206a613d36b8f49e297eae9c5593a21bf9b92ddfe2c23f85eb92cc`. Its cached `refs/main` must point to that revision because the pinned upstream loader requests `main`. Missing or failed tokenizer initialization stops rendering.
+
+```sh
+python3 run.py doctor
+./launch-voice-studio.sh
+# For an SSH-only session:
+./launch-voice-studio.sh --no-browser
+```
+
+`doctor` checks actual GPU kernel compilation, encoder tools, reference checksums, primary model weights, text-tokenizer loading, and the pinned offline speech tokenizer. `doctor --kernel-only` checks the runtime without claiming voice readiness. Model loading and conditioning are additionally checked before actual generation. The browser server retains loopback binding and session-token authentication; remote access should use SSH port forwarding, with the printed token-bearing launch URL.
+
+Linux defaults disable CUDA graphs, set the MLX cache limit to zero, use a 4096 MiB **soft** memory guideline, and set the convolution cache to 512. These preserve model precision; they do not promise a hard VRAM ceiling. The convolution setting also supports the saved Expressive engine on the tested GPU. Optional `[runtime]` values in `local.toml` are `backend = "cuda"` or `"metal"`, and `memory_mib = 4096`; `VOICE_STUDIO_BACKEND` and `VOICE_STUDIO_MEMORY_MIB` override them. An unavailable selected GPU fails explicitly.
+
+The shared GPU lock defaults to `~/.local/state/voice-studio/gpu.lock` (or `$XDG_STATE_HOME/voice-studio/gpu.lock`). `VOICE_STUDIO_GPU_LOCK` may select one common lock path for installations sharing a GPU. Do not give competing installations different lock paths. Models and recognizer caches are released before relinquishing ownership, including ordinary Python exception paths. A native-process abort is recovered by the OS releasing the lock; rerun the interrupted stage to resume its saved checkpoints.
+
+## Reusable EPUB audiobook jobs
+
+`audiobook` creates a new job for each book. Existing historical jobs remain governed by their original edition commands and fingerprints; this command does not rewrite their identities or resume a book paused in another workspace.
+
+```sh
+python3 run.py audiobook prepare --epub /path/to/book.epub --job /path/to/new-job --code include
+python3 run.py audiobook status --job /path/to/new-job
+python3 run.py audiobook render --job /path/to/new-job --max-segments 10
+python3 run.py audiobook check --job /path/to/new-job
+python3 run.py audiobook review --job /path/to/new-job
+```
+
+Preparation preserves source locations, paragraph and heading roles, an omission ledger, the original EPUB, voice reference and its optional provenance record, full voice settings, model-file hashes, and runtime identity. It follows the linear EPUB spine; navigation and non-linear resources are recorded as omissions. XHTML must be well-formed and resources unencrypted. A cover is read from EPUB 2/3 metadata or supplied with `--cover`; the original RGB artwork is preserved with an appended AUDIOBOOK band. The default recognizer is `<workspace>/work/whisper-small.en-mlx`; set `--asr-model` for a separately installed local model. `--workspace`, `--data-dir`, and `--voice` select private assets. This pipeline currently uses the Natural engine.
+
+`--code include` retains standalone `<pre>` blocks. Choosing `--code omit` omits those blocks for this book and records their source text and hashes; surrounding explanations, inline code, and captions remain. Publisher-specific class names, complex tables, and unusual note conventions need source-plan review. Long paragraphs split into bounded passages while keeping each sentence dash with both anchor words and retaining paragraph identity. The command fails on unsupported spine resources or unbreakable tokens that exceed the passage limit. Review `plan.json` and its omission ledger before a full render.
+
+`render` generates pending passages only. `check` performs unprompted recognition after synthesis models have been released, preserves raw ASR, and holds wording, signal, or timing uncertainty. A held passage stays held during ordinary resume. To request a new seed for one held passage:
+
+```sh
+python3 run.py audiobook repair --job /path/to/new-job --segment 1/3 --seed-offset 1000
+```
+
+Repairs retain prior raw WAVs, recognition, checkpoints, and attempt evidence. For an ASR mistake confirmed by listening, save the actually heard transcript in a UTF-8 file and bind a deliberate review to that exact recording:
+
+```sh
+python3 run.py audiobook review --job /path/to/new-job --segment 1/3 --transcript /path/to/heard.txt --note "Listening confirms the source wording; recognition misheard the name."
+```
+
+Review does not bypass signal or dash-timing checks. Raw transcripts remain unchanged. Avoid approving a passage solely because the expected text is known.
+
+```sh
+python3 run.py audiobook pause --job /path/to/new-job
+python3 run.py audiobook resume --job /path/to/new-job
+python3 run.py audiobook check --job /path/to/new-job
+python3 run.py audiobook finish --job /path/to/new-job --output /path/to/audiobook-output
+python3 run.py audiobook verify --job /path/to/new-job
+```
+
+Pause takes effect between passages. Resume renders remaining passages; run `check` afterward. Each mutating stage holds the job lock; `status` remains readable while a worker runs. Changing the source, voice, model, runtime, or frozen plan rejects checkpoint reuse and requires a new job. Original attempt evidence survives an interruption before its current checkpoint is written.
+
+Finalization requires every passage to pass wording, signal, and timing checks. Total quiet targets are 0.85 seconds after headings, 0.70 between paragraphs, 1.00 before headings, and 0.35 at sentence dashes. Existing quiet counts toward those targets; the pipeline inserts silence without deleting audio. Dash insertion additionally requires adjacent recognized words, sufficient timing confidence, and an existing quiet gap. Native pauses longer than the target are retained. Chunks within one paragraph receive no extra paragraph pause.
+
+Choose an empty output directory; finalization refuses to overwrite a directory owned by another job or containing unrelated files. Temporary media is created beside its destination, so output may reside on a separate drive. Outputs are ordered 24 kHz PCM24 WAV chapters, 128 kbps MP3 chapters, and `audiobook.m4b` with AAC-LC audio, QuickTime chapters, original cover plus AUDIOBOOK strip, and audiobook metadata. Final checks include passage-to-chapter waveform conservation, chapters and ordering, cover and metadata readback, duration, and full audio decoding. `verification.json` records the evidence. Automated recognition is a gate, not a substitute for listening to the final book.
+
 ## Audiobook workflow
 
 `python3 run.py book` dispatches the existing higher-precision edition wrapper. Its actions are `render`, `adjudicate`, `repair`, `audit`, `finalize`, and `verify`. Use `render --plan-only` to inspect the prepared plan without generating speech. `book-new-b` addresses the older 4-bit edition.
 
 This workflow is specifically the existing 30-track, nine-folder *Thinking in Systems* recipe. It requires the externally prepared `work/narration_text/spoken_manifest.json`, `work/book_subsections.json`, source text paths, frozen voice profile, and model assets. It does not import arbitrary EPUBs or recreate the original chapter inventories. These inputs and historical jobs are data, not repository fixtures.
 
-Run render, recognition, repair, and finalization stages sequentially. Do not generate in Studio during a book generation/recognition job: the app and book tools do not share a global GPU lock. Repair and adjudication helpers must not run concurrently with the renderer. Repairs retain source wording and their evidence; finalization accepts only verified checkpoints with matching identities and intact audio.
+Run render, recognition, repair, and finalization stages sequentially. Studio and book inference share a user-level GPU lock; a competing process exits with a busy error. Generation models are released before recognition. Repair and adjudication helpers must not run concurrently with the renderer. Repairs retain source wording and their evidence; finalization accepts only verified checkpoints with matching identities and intact audio.
 
 `precision_comparison.py` and `publish_precision_comparison.py` retain the historical A/B experiment. Its frozen source hash still refers to the original external Studio code. Historical checks deliberately reject changed inputs; do not rewrite fingerprints to force reuse. A new comparison needs separately prepared inputs and its own job identity.
 
@@ -90,7 +162,7 @@ uv run python -m unittest discover -p 'test_*.py'
 node --test test_web.cjs
 uvx ruff check .
 uvx ruff format --check .
-uvx mypy --python-executable .venv/bin/python studio.py voice_profiles.py project_paths.py run.py
+uvx mypy --python-executable .venv/bin/python studio.py voice_profiles.py project_paths.py run.py runtime.py doctor.py audiobook.py book_prepare.py book_pacing.py book_package.py
 ```
 
 Tests use fake tone generation and real audio encoding. They establish plumbing and verification behavior; automated recognition does not guarantee flawless pronunciation or replace listening review. No production speech generation is triggered by the default tests.

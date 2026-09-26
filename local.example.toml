@@ -3,3 +3,8 @@ workspace_root = "data"
 studio_data_dir = "data/studio"
 # Existing installations can reuse their current Python environment:
 # python = "/path/to/existing/environment/bin/python"
+
+# Defaults follow the host: metal on macOS, cuda on Linux. No CPU fallback.
+# [runtime]
+# backend = "cuda"
+# memory_mib = 4096  # Soft allocator guideline, not a hard VRAM limit.

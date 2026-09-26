@@ -14,7 +14,6 @@ import math
 import os
 import re
 import secrets
-import shutil
 import signal
 import subprocess
 import tempfile
@@ -31,6 +30,7 @@ from urllib.request import Request, urlopen
 import numpy as np
 import soundfile as sf
 
+import runtime
 from project_paths import studio_data_dir, workspace_root
 from voice_profiles import (
     DEFAULT_VOICE_ID,
@@ -212,6 +212,7 @@ class NativeEngine:
         self.reference_dir = (
             reference_dir if reference_dir is not None else studio_data_dir()
         )
+        runtime.register_model(self)
         self.model: Any = None
         self.conds: Any = None
         self.key: str | None = None
@@ -228,8 +229,8 @@ class NativeEngine:
         os.environ["HF_HOME"] = str(self.root / "work/hf-narration-cache")
         os.environ["HF_HUB_OFFLINE"] = "1"
         os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
-        import mlx.core as mx
-        from mlx_audio.tts.utils import load_model
+        mx = runtime.initialize(self.root)
+        runtime.check_tokenizer(self.root)
 
         started = time.monotonic()
         reference = self.reference_dir / self.profile["reference"]
@@ -257,7 +258,7 @@ class NativeEngine:
                     "The selected voice reference changed; restore it before rendering."
                 )
             if self.cache_identity != identity:
-                self.model = load_model(str(model_path))
+                self.model = runtime.load_checked_model(model_path)
                 if key == "natural":
                     self.model.prepare_conditionals(str(reference))
                 else:
@@ -277,6 +278,17 @@ class NativeEngine:
         mx.random.seed(self.profile["synthesis"]["seed"])
         return time.monotonic() - started
 
+    def release(self) -> None:
+        """Drop model and reference tensors before another GPU workload starts."""
+        try:
+            runtime.synchronize_mlx()
+        finally:
+            self.conds = None
+            self.model = None
+            self.key = None
+            self.cache_identity = None
+            runtime.clear_cache()
+
     def generate(
         self, text: str, settings: dict[str, Any]
     ) -> Iterator[tuple[np.ndarray, int]]:
@@ -288,7 +300,11 @@ class NativeEngine:
             "repetition_penalty": params["repetition_penalty"],
         }
         if self.key == "natural":
-            kwargs.update(top_p=0.95, max_tokens=1200, split_pattern=None)
+            kwargs.update(
+                top_p=0.95,
+                max_tokens=settings.get("max_tokens", 1200),
+                split_pattern=None,
+            )
         else:
             kwargs.update(
                 conds=self.conds,
@@ -359,15 +375,16 @@ class Studio:
         self.profile = self.profiles[DEFAULT_VOICE_ID]
         self.renders = directory / "renders"
         self.renders.mkdir(exist_ok=True)
-        self.ffmpeg = shutil.which("ffmpeg") or "/opt/homebrew/bin/ffmpeg"
-        if not Path(self.ffmpeg).is_file():
-            raise RuntimeError(
-                "FFmpeg is missing. Restore the existing Homebrew FFmpeg installation."
-            )
+        self.ffmpeg = runtime.binary("ffmpeg")
         self.engine = (
             NativeEngine(self.profile, self.workspace, self.directory)
             if engine_factory is NativeEngine
             else engine_factory(self.profile)
+        )
+        self.runtime_available, self.runtime_error = (
+            runtime.availability(self.workspace)
+            if engine_factory is NativeEngine
+            else (True, None)
         )
         self.engine_factory = engine_factory
         self.engine_profile_identity = profile_identity(self.profile)
@@ -400,12 +417,25 @@ class Studio:
             key: {
                 "name": profile["name"],
                 "description": profile.get("description", "Saved voice reference"),
-                "engines": engine_capabilities(profile, self.workspace, self.directory),
+                "engines": engine_capabilities(
+                    profile,
+                    self.workspace,
+                    self.directory,
+                    native=self.engine_factory is NativeEngine,
+                ),
                 **profile_defaults(profile),
             }
             for key, profile in self.profiles.items()
         }
+        if not self.runtime_available:
+            for voice in voices.values():
+                for capability in voice["engines"].values():
+                    capability["available"] = False
         return {
+            "runtime": {
+                "available": self.runtime_available,
+                "error": self.runtime_error,
+            },
             "voice": self.profile["name"],
             "engines": voices[DEFAULT_VOICE_ID]["engines"],
             "default_voice_id": DEFAULT_VOICE_ID,
@@ -563,10 +593,38 @@ class Studio:
         folder = self.renders / job_id
         started = time.monotonic()
         evidence: list[dict[str, Any]] = []
-        frames = 0
         try:
             self._check_cancel()
-            self.update(job_id, status="loading")
+            with contextlib.ExitStack() as stack:
+                if isinstance(self.engine, NativeEngine):
+                    stack.enter_context(runtime.gpu_lease())
+                self._synthesize(
+                    job_id, settings, chunks, profile, folder, started, evidence
+                )
+            return
+        except Cancelled:
+            self.update(job_id, status="cancelled", cancelling=False)
+        except Exception as exc:
+            self.update(job_id, status="failed", error=str(exc) or type(exc).__name__)
+        finally:
+            with self.lock:
+                if self.active == job_id:
+                    self.active = None
+
+    def _synthesize(
+        self,
+        job_id: str,
+        settings: dict[str, Any],
+        chunks: list[dict[str, Any]],
+        profile: dict[str, Any],
+        folder: Path,
+        started: float,
+        evidence: list[dict[str, Any]],
+    ) -> None:
+        """Run the render while its native GPU lease remains held."""
+        frames = 0
+        try:
+            self.update(job_id, status="loading", runtime=runtime.identity())
             selected_identity = profile_identity(profile)
             if self.engine_profile_identity != selected_identity:
                 if isinstance(self.engine, NativeEngine):
@@ -725,10 +783,10 @@ class Studio:
                 elapsed_seconds=time.monotonic() - started,
             )
         finally:
+            if isinstance(self.engine, NativeEngine):
+                self.engine.release()
             for path in folder.glob("*.partial.*"):
                 path.unlink(missing_ok=True)
-            with self.lock:
-                self.active = None
 
 
 def file_hash(path: Path) -> str:
@@ -977,7 +1035,7 @@ def main() -> None:
         (state / "running.json").chmod(0o600)
         print("Voice Studio: " + url, flush=True)
         print(
-            "Keep this window open. Press Control-C to stop. Audio stays on this Mac.",
+            "Keep this window open. Press Control-C to stop. Audio stays on this computer.",
             flush=True,
         )
         if not args.no_browser:

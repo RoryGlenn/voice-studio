@@ -9,6 +9,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+import runtime
+
 DEFAULT_VOICE_ID = "default"
 
 
@@ -83,18 +85,35 @@ def load_profiles(directory: Path) -> dict[str, dict[str, Any]]:
 
 
 def engine_capabilities(
-    profile: dict[str, Any], workspace: Path, directory: Path
+    profile: dict[str, Any], workspace: Path, directory: Path, *, native: bool = True
 ) -> dict[str, Any]:
-    """Describe availability without returning private model or reference paths."""
+    """Describe cheap native readiness without hashing model files during polling."""
     reference_present = (directory / profile["reference"]).is_file()
+    prerequisite_error = runtime.prerequisites(workspace) if native else None
     engines = {}
     for key, value in profile["engines"].items():
         path = workspace / value["path"]
+        required = ["config.json"]
+        if native:
+            required.extend(("model.safetensors", "conds.safetensors"))
+        present = all(
+            (path / name).is_file() and (path / name).stat().st_size > 0
+            for name in required
+        )
+        if not native:
+            present = present and any(path.glob("*.safetensors"))
+        if native:
+            if key == "natural":
+                text_tokenizer = (path / "tokenizer.json").is_file() or all(
+                    (path / name).is_file()
+                    for name in ("vocab.json", "merges.txt", "tokenizer_config.json")
+                )
+            else:
+                text_tokenizer = (path / "tokenizer.json").is_file()
+            present = present and text_tokenizer
         engines[key] = {
             "label": value["label"],
-            "available": reference_present
-            and (path / "config.json").is_file()
-            and any(path.glob("*.safetensors")),
+            "available": reference_present and present and prerequisite_error is None,
             "expression": key == "expressive",
         }
     return engines
