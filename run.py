@@ -8,6 +8,8 @@ import os
 from project_paths import REPOSITORY, python_executable
 
 COMMANDS = {
+    "doctor": "doctor.py",
+    "audiobook": "audiobook.py",
     "studio": "studio.py",
     "book": "higher_precision_book.py",
     "book-new-b": "new_b_book.py",

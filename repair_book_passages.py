@@ -13,6 +13,7 @@ import numpy as np
 import soundfile as sf
 import spacy
 
+import runtime
 from render_book import (
     JOB,
     MODEL,
@@ -186,6 +187,7 @@ def repair_chunks(
     return chunks
 
 
+@runtime.gpu_operation
 def main() -> None:
     """Regenerate held audio without changing accepted passages or their source text.
 
@@ -194,8 +196,7 @@ def main() -> None:
     None
         Writes accepted repairs atomically; unresolved passages remain held.
     """
-    import mlx.core as mx
-    from mlx_audio.tts.utils import load_model
+    mx = runtime.initialize(ROOT)
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--files", nargs="+", type=Path)
@@ -213,8 +214,7 @@ def main() -> None:
     if not pending:
         print("No held passages", flush=True)
         return
-    model = load_model(str(MODEL))
-    model.prepare_conditionals(str(REFERENCE))
+    model = runtime.ReloadableModel(MODEL, REFERENCE, ROOT)
     with (JOB / "repair_generation.log").open("a") as log:
         for path, original in pending:
             check = original["strong_check"] or original["tiny_check"]
@@ -225,6 +225,7 @@ def main() -> None:
             )
             save_json(JOB / "repair_history" / path.parent.name / path.name, original)
             for attempt in range(3):
+                model.prepare()
                 mx.random.seed(
                     20260905
                     + int(original["text_sha256"][:7], 16)
