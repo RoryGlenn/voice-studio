@@ -13,9 +13,30 @@ from typing import Any
 import numpy as np
 import soundfile as sf
 
+import runtime
 from book_pacing import RATE
 from doctor import file_hash as digest
 from render_book import save_json as save
+
+
+def chapter_stem(number: int, title: str) -> str:
+    """Return a readable filename stem bounded by UTF-8 bytes, preserving its track ID."""
+    prefix = f"{number:02d} - "
+    safe_title = re.sub(r'[\x00-\x1f\x7f/:?"<>|*\\]', "", title)
+    stem = prefix + safe_title
+    # Reserve the longest media suffix plus a possible leading dot, including
+    # temporary names, within the 255-byte component limit on supported hosts.
+    budget = 255 - len(".partial.wav".encode("utf-8")) - len(".".encode("utf-8"))
+    if len(stem.encode("utf-8")) <= budget:
+        return stem
+    suffix = "-" + hashlib.sha256(title.encode("utf-8")).hexdigest()[:12]
+    title_budget = budget - len(prefix.encode("utf-8")) - len(suffix.encode("utf-8"))
+    if title_budget < 0:
+        raise ValueError("Track identifier exceeds the filename component limit")
+    truncated = safe_title.encode("utf-8")[:title_budget].decode(
+        "utf-8", errors="ignore"
+    )
+    return prefix + truncated + suffix
 
 
 def claim_output(output: Path, plan: dict[str, Any]) -> None:
@@ -127,7 +148,7 @@ def export_track(
     from mutagen.id3 import APIC, ID3, TALB, TCON, TIT2, TPE1, TPE2, TRCK, TXXX
 
     output.mkdir(parents=True, exist_ok=True)
-    stem = f"{track['track']:02d} - " + re.sub('[/:?"<>|*\\\\]', "", track["title"])
+    stem = chapter_stem(track["track"], track["title"])
     wav = output / f"{stem}.wav"
     mp3 = output / f"{stem}.mp3"
     temporary = output / f".chapter-{track['track']:04d}.partial.wav"
@@ -203,7 +224,7 @@ def export_track(
     temporary.replace(wav)
     subprocess.run(
         [
-            "ffmpeg",
+            runtime.binary("ffmpeg"),
             "-v",
             "error",
             "-nostdin",
@@ -242,7 +263,17 @@ def export_track(
         tags.add(tag)
     tags.save(mp3, v2_version=3)
     subprocess.run(
-        ["ffmpeg", "-v", "error", "-nostdin", "-i", str(mp3), "-f", "null", "-"],
+        [
+            runtime.binary("ffmpeg"),
+            "-v",
+            "error",
+            "-nostdin",
+            "-i",
+            str(mp3),
+            "-f",
+            "null",
+            "-",
+        ],
         check=True,
     )
     result = {
@@ -326,7 +357,7 @@ def finish(plan: dict[str, Any], job: Path, output: Path) -> dict[str, Any]:
     partial = output / ".audiobook.partial.m4b"
     subprocess.run(
         [
-            "ffmpeg",
+            runtime.binary("ffmpeg"),
             "-v",
             "error",
             "-nostdin",
@@ -383,7 +414,7 @@ def finish(plan: dict[str, Any], job: Path, output: Path) -> dict[str, Any]:
     probe = json.loads(
         subprocess.check_output(
             [
-                "ffprobe",
+                runtime.binary("ffprobe"),
                 "-v",
                 "error",
                 "-show_chapters",
@@ -436,7 +467,17 @@ def finish(plan: dict[str, Any], job: Path, output: Path) -> dict[str, Any]:
     if not has_quicktime_chapters(partial):
         raise ValueError("Missing QuickTime chapter reference")
     subprocess.run(
-        ["ffmpeg", "-v", "error", "-nostdin", "-i", str(partial), "-f", "null", "-"],
+        [
+            runtime.binary("ffmpeg"),
+            "-v",
+            "error",
+            "-nostdin",
+            "-i",
+            str(partial),
+            "-f",
+            "null",
+            "-",
+        ],
         check=True,
     )
     final = output / "audiobook.m4b"

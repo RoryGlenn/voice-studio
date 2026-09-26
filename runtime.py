@@ -87,6 +87,9 @@ def identity() -> dict[str, Any]:
     for name in (
         "mlx",
         "mlx-cuda-12",
+        "nvidia-cuda-runtime-cu12",
+        "nvidia-cuda-nvcc-cu12",
+        "nvidia-cuda-cccl-cu12",
         "mlx-audio",
         "mlx-whisper",
         "numpy",

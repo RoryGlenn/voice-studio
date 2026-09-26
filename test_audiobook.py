@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import errno
+import importlib.metadata
 import io
 import json
 import os
@@ -20,6 +21,7 @@ from PIL import Image
 import audiobook
 import book_package
 import book_prepare
+import runtime
 from book_pacing import RATE, dash_insertions, insert_pauses
 from doctor import file_hash
 from render_book import digest
@@ -172,6 +174,132 @@ class AudiobookChecks(unittest.TestCase):
         boundary = report["tracks"][0]["boundaries"][-1]
         self.assertEqual(boundary["kind"], "paragraph_to_heading")
         self.assertAlmostEqual(boundary["result_seconds"], 1.0)
+
+    def test_long_ascii_and_unicode_chapter_names_keep_full_metadata(self) -> None:
+        titles = ["An extended section title " * 16 + "ASCII", "界観測章節" * 24]
+        long_epub = self.root / "long-headings.epub"
+        with (
+            zipfile.ZipFile(self.epub) as source,
+            zipfile.ZipFile(long_epub, "w") as target,
+        ):
+            for item in source.infolist():
+                content = source.read(item.filename)
+                if item.filename == "OPS/one.xhtml":
+                    content = content.replace(b"First Experiment", titles[0].encode())
+                elif item.filename == "OPS/two.xhtml":
+                    content = content.replace(b"Second Experiment", titles[1].encode())
+                target.writestr(item, content)
+        self.job = self.root / "long-heading-job"
+        self.plan = book_prepare.prepare(
+            long_epub,
+            self.job,
+            self.root,
+            self.directory,
+            "default",
+            None,
+            "omit",
+            Path("models/asr"),
+        )
+        self.render_all()
+        report = book_package.finish(
+            self.plan, self.job, self.root / "long-heading-exports"
+        )
+        names = [
+            Path(row[kind]).name for row in report["tracks"] for kind in ("wav", "mp3")
+        ]
+        self.assertEqual(len(set(names)), 4)
+        self.assertTrue(all(len(name.encode("utf-8")) <= 255 for name in names))
+        for number, row in enumerate(report["tracks"], 1):
+            stem = Path(row["wav"]).stem
+            self.assertTrue(stem.startswith(f"{number:02d} - "))
+            self.assertRegex(stem, r"-[a-f0-9]{12}$")
+            self.assertLessEqual(
+                len(("." + stem + ".partial.wav").encode("utf-8")), 255
+            )
+        probe = json.loads(
+            subprocess.check_output(
+                [
+                    runtime.binary("ffprobe"),
+                    "-v",
+                    "error",
+                    "-show_chapters",
+                    "-of",
+                    "json",
+                    report["m4b"],
+                ]
+            )
+        )
+        self.assertEqual(
+            [chapter["tags"]["title"] for chapter in probe["chapters"]], titles
+        )
+        from mutagen.id3 import ID3
+
+        self.assertEqual(
+            [str(ID3(row["mp3"])["TIT2"]) for row in report["tracks"]], titles
+        )
+        self.assertEqual(
+            book_package.chapter_stem(1, "First Experiment"), "01 - First Experiment"
+        )
+        self.assertNotEqual(
+            book_package.chapter_stem(1, titles[0] + "A"),
+            book_package.chapter_stem(1, titles[0] + "B"),
+        )
+        self.assertEqual(
+            book_package.chapter_stem(2, titles[1]),
+            book_package.chapter_stem(2, titles[1]),
+        )
+
+    def test_packaging_resolves_tools_with_restricted_path(self) -> None:
+        self.render_all()
+        tools = {name: runtime.binary(name) for name in ("ffmpeg", "ffprobe")}
+        empty_path = self.root / "empty-path"
+        empty_path.mkdir()
+        with (
+            patch.dict(os.environ, {"PATH": str(empty_path)}),
+            patch(
+                "book_package.runtime.binary", side_effect=tools.__getitem__
+            ) as resolve,
+        ):
+            report = book_package.finish(
+                self.plan, self.job, self.root / "restricted-path-exports"
+            )
+        self.assertEqual(report["full_audio_decode"], "pass")
+        self.assertEqual(
+            {call.args[0] for call in resolve.call_args_list}, {"ffmpeg", "ffprobe"}
+        )
+
+    def test_cuda_package_changes_invalidate_frozen_runtime_identity(self) -> None:
+        packages = (
+            "nvidia-cuda-runtime-cu12",
+            "nvidia-cuda-nvcc-cu12",
+            "nvidia-cuda-cccl-cu12",
+        )
+        version = importlib.metadata.version
+        frozen = self.plan["identity"]["runtime"]
+        original_plan = (self.job / "plan.json").read_bytes()
+        for package in packages:
+            with self.subTest(package=package):
+                self.assertIn(package, frozen["packages"])
+                with patch(
+                    "importlib.metadata.version",
+                    side_effect=lambda name: (
+                        "changed-version" if name == package else version(name)
+                    ),
+                ):
+                    self.assertNotEqual(runtime.identity(), frozen)
+                    with self.assertRaisesRegex(ValueError, "Runtime or model changed"):
+                        audiobook.load_plan(self.job)
+                self.assertEqual((self.job / "plan.json").read_bytes(), original_plan)
+
+        def absent(name: str) -> str:
+            if name in packages:
+                raise importlib.metadata.PackageNotFoundError(name)
+            return version(name)
+
+        with patch("importlib.metadata.version", side_effect=absent):
+            self.assertTrue(
+                all(runtime.identity()["packages"][name] is None for name in packages)
+            )
 
     def test_paused_or_completed_jobs_do_not_prepare_a_model(self) -> None:
         (self.job / "paused").write_text("user paused")
