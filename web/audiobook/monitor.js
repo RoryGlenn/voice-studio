@@ -2,7 +2,6 @@
 (function (root) {
   'use strict';
   const metrics = ['cpu', 'gpu', 'ram', 'vram'];
-  const colors = ['#8cdbb5', '#91baff', '#c9a4f3', '#efc28b'];
   const finite = v => typeof v === 'number' && Number.isFinite(v);
   const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   function mergeSamples(existing, history, sample, now) {
@@ -61,25 +60,32 @@
   if(typeof module!=='undefined')module.exports=helpers;
   if(!root.document)return;
   const $=id=>document.getElementById(id);
+  let palette;
+  function readPalette(){
+    const style=getComputedStyle(document.documentElement),color=name=>style.getPropertyValue('--'+name).trim();
+    palette=Object.fromEntries(metrics.map(key=>[key,color(key+'-color')]));
+    palette.muted=color('muted');palette.grid=color('border');palette.error=color('error');
+  }
+  readPalette();
   let samples=[], latest={}, activity={}, range=120, sortKey='cpu_percent', ascending=false, frame=null;
   const inspected={}, charts={}, time = value => new Date(value*1000).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});
   const unit=key=>['cpu','gpu'].includes(key)?'%':' GiB';
   const format=(key,value)=>finite(value)?value.toFixed(1)+unit(key):'Unavailable';
   const stateLabels={rendering:'Narrating',checking:'Checking',recovering:'Recovering',waiting:'GPU wait',retrying:'Retry',packaging:'Packaging',paused:'Paused',complete:'Complete',stopped:'Stopped',failed:'Failed',unknown:'No samples'};
-  const stateColor=state=>({rendering:'#589b7b',checking:'#738cc7',waiting:'#b69959',retrying:'#ce7f68',failed:'#ce7f68',packaging:'#a489c4',recovering:'#81908b',complete:'#589b7b',paused:'#63716d',stopped:'#63716d'}[state]||'#263330');
+  const stateColor=state=>({rendering:palette.cpu,checking:palette.gpu,waiting:palette.vram,retrying:palette.error,failed:palette.error,packaging:palette.ram,recovering:palette.muted,complete:palette.cpu,paused:palette.muted,stopped:palette.muted}[state]||palette.grid);
   function queue(){if(frame==null)frame=requestAnimationFrame(()=>{frame=null;render();});}
-  function createChart(key,index,data,max){
+  function createChart(key,data,max){
     const host=$(key+'-chart');
     const plot = new root.uPlot({
       width:Math.max(200,host.clientWidth),height:220,padding:[12,16,0,0],
       legend:{show:false},select:{show:false},
       cursor:{drag:{x:false,y:false},sync:{key:'system-monitor',scales:['x',null]}},
       scales:{x:{time:true},y:{range:()=>[0,max()]}},
-      axes:[{stroke:'#9baea7',grid:{show:false},ticks:{show:false},size:38,space:110,font:'11px sans-serif',values:(_,ticks)=>ticks.map(t=>new Date(t*1000).toLocaleTimeString([],range===120?{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}:{hour:'2-digit',minute:'2-digit'}))},
-        {stroke:'#9baea7',grid:{stroke:'#2b3b35',width:1},ticks:{show:false},size:54,font:'11px sans-serif',values:(_,ticks)=>ticks.map(v=>Number(v.toFixed(1))+unit(key)),incrs:['cpu','gpu'].includes(key)?[25]:undefined}],
-      series:[{}, {label:key.toUpperCase(),stroke:colors[index],width:1.7,fill:colors[index]+'12',spanGaps:false,points:{show:false}}],
+      axes:[{stroke:()=>palette.muted,grid:{show:false},ticks:{show:false},size:38,space:110,font:'11px sans-serif',values:(_,ticks)=>ticks.map(t=>new Date(t*1000).toLocaleTimeString([],range===120?{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}:{hour:'2-digit',minute:'2-digit'}))},
+        {stroke:()=>palette.muted,grid:{stroke:()=>palette.grid,width:1},ticks:{show:false},size:54,font:'11px sans-serif',values:(_,ticks)=>ticks.map(v=>Number(v.toFixed(1))+unit(key)),incrs:['cpu','gpu'].includes(key)?[25]:undefined}],
+      series:[{}, {label:key.toUpperCase(),stroke:()=>palette[key],width:1.7,fill:()=>palette[key]+'12',spanGaps:false,points:{show:false}}],
       hooks:{setCursor:[u=>{const i=u.cursor.idx;$(key+'-hover').textContent=i==null?'Hover to inspect':time(u.data[0][i])+' · '+format(key,u.data[1][i]);}],
-        draw:[u=>{const ctx=u.ctx;ctx.save();ctx.strokeStyle='#78938755';ctx.setLineDash([3,5]);
+        draw:[u=>{const ctx=u.ctx;ctx.save();ctx.strokeStyle=palette.muted+'55';ctx.setLineDash([3,5]);
           for(const segment of stateSegments(samples,u.scales.x.min,u.scales.x.max)){
             if(segment.from<=u.scales.x.min || segment.state==='unknown')continue;
             const x=u.valToPos(segment.from,'x',true);ctx.beginPath();ctx.moveTo(x,u.bbox.top);ctx.lineTo(x,u.bbox.top+u.bbox.height);ctx.stroke();
@@ -105,9 +111,9 @@
   function render(){
     if($('system').hidden || !latest.observed_at)return;
     const now=Date.now()/1000,start=now-range;
-    for(const [index,key] of metrics.entries()){
+    for(const key of metrics){
       const data=plotData(samples,key,start,now),host=$(key+'-chart');
-      if(!charts[key])charts[key]=createChart(key,index,data,()=>capacity(key));
+      if(!charts[key])charts[key]=createChart(key,data,()=>capacity(key));
       const chart=charts[key],width=Math.max(200,host.clientWidth);
       if(chart.width!==width)chart.setSize({width,height:220});
       chart.setData(data,false);chart.setScale('x',{min:start,max:now});chart.setScale('y',{min:0,max:capacity(key)});
@@ -125,7 +131,14 @@
   }
   function renderProcesses(){
     const rows=sortProcesses(activity.processes || [],sortKey,ascending);
-    $('process-list').innerHTML=rows.length?rows.map(p=>`<tr><td title="${escape(p.name)}">${escape(p.name)}</td><td>${Number(p.pid)}</td><td><span class="process-usage" style="--load:${Math.min(100,Math.max(0,p.cpu_percent || 0))}%">${finite(p.cpu_percent)?p.cpu_percent.toFixed(1):'—'}</span></td><td>${finite(p.rss)?Math.round(p.rss/1048576):'—'}</td></tr>`).join(''):'<tr><td colspan="4">Process readings unavailable</td></tr>';
+    const coreCount=activity.cores?.length || 0;
+    $('process-list').innerHTML=rows.length?rows.map(p=>{
+      const cpu=finite(p.cpu_percent) && p.cpu_percent>=0?p.cpu_percent:null;
+      const total=cpu!=null && coreCount>0?Math.min(100,cpu/coreCount):null;
+      const usedCores=cpu==null?null:Number((cpu/100).toFixed(2));
+      const cores=usedCores==null?'':`<small class="process-cores">${usedCores} ${usedCores===1?'core':'cores'}</small>`;
+      return `<tr><td title="${escape(p.name)}">${escape(p.name)}</td><td>${Number(p.pid)}</td><td class="process-cpu"><span class="process-usage" style="--load:${total ?? 0}%"${total==null?' title="Total CPU usage unavailable"':''}>${total==null?'—':total.toFixed(1)+'%'}</span>${cores}</td><td>${finite(p.rss)?Math.round(p.rss/1048576):'—'}</td></tr>`;
+    }).join(''):'<tr><td colspan="4">Process readings unavailable</td></tr>';
   }
   function update(data){
     latest=data;
@@ -150,9 +163,14 @@
   }));
   document.querySelectorAll('[data-sort]').forEach(button=>button.addEventListener('click',()=>{
     ascending=sortKey===button.dataset.sort?!ascending:button.dataset.sort==='name';sortKey=button.dataset.sort;
-    document.querySelectorAll('[data-sort]').forEach(b=>{b.parentElement.removeAttribute('aria-sort');b.textContent={name:'Process',pid:'PID',cpu_percent:'CPU %',rss:'RAM MiB'}[b.dataset.sort];});
+    document.querySelectorAll('[data-sort]').forEach(b=>{b.parentElement.removeAttribute('aria-sort');b.textContent={name:'Process',pid:'PID',cpu_percent:'CPU % of total',rss:'RAM MiB'}[b.dataset.sort];});
     button.parentElement.setAttribute('aria-sort',ascending?'ascending':'descending');button.textContent+=ascending?' ↑':' ↓';renderProcesses();
   }));
+  document.addEventListener('themechange',()=>{
+    readPalette();
+    for(const chart of Object.values(charts))chart.redraw(true,true);
+    queue();
+  });
   new ResizeObserver(queue).observe($('system'));
   root.SystemMonitor={update,render,disconnected:()=>update({...latest,activity:null})};
 })(typeof window==='undefined'?globalThis:window);
