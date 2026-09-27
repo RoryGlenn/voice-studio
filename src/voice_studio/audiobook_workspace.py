@@ -178,13 +178,25 @@ class Workspace:
             chapters.append(chapter)
             audio_seconds += chapter["seconds"]
         now = time.time()
+        activity = data["activity"]
+        fresh = now - (activity.get("sampled_at") or 0) < 10
+        gpu = (activity.get("gpu") or {}) if fresh else {}
+        memory = (activity.get("memory") or {}) if fresh else {}
         sample = {
             "at": now,
             "generated": data["generated"],
             "checked": data["checked"],
             "state": data["state"],
-            "cpu": data["activity"].get("cpu_percent"),
-            "gpu": (data["activity"].get("gpu") or {}).get("utilization"),
+            "cpu": activity.get("cpu_percent") if fresh else None,
+            "gpu": gpu.get("utilization"),
+            "ram": memory.get("used", 0) / 1024**3 if memory else None,
+            "ram_total": memory.get("total", 0) / 1024**3 if memory else None,
+            "vram": gpu["memory_used"] / 1024
+            if gpu.get("memory_used") is not None
+            else None,
+            "vram_total": gpu["memory_total"] / 1024
+            if gpu.get("memory_total") is not None
+            else None,
         }
         if now - self.last_history >= 5:
             self.history = [h for h in self.history if now - h["at"] < 3600][-719:] + [
@@ -227,7 +239,7 @@ class Workspace:
             review=review,
             recent=sorted(recent, key=lambda r: r["at"], reverse=True)[:8],
             audio_seconds=audio_seconds,
-            history=self.history[-60:],
+            history=self.history,
             estimate_seconds=estimate,
             pause_requested=(self.job / "paused").exists(),
             download_ready=ready,

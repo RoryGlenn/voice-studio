@@ -75,6 +75,51 @@ class WorkspaceTests(unittest.TestCase):
         self.addCleanup(self.server.shutdown)
         self.base = f"http://127.0.0.1:{self.port}"
 
+    def test_memory_history_survives_reload_and_gpu_failure(self):
+        import time
+
+        self.workspace.monitor.snapshot = lambda: {
+            "sampled_at": time.time(),
+            "cpu_percent": 12,
+            "memory": {"used": 8 * 1024**3, "total": 64 * 1024**3},
+            "gpu": {"utilization": 70, "memory_used": 4096, "memory_total": 8192},
+        }
+        self.workspace.last_history = 0
+        self.workspace.refresh()
+        row = self.workspace.history[-1]
+        self.assertEqual((row["ram"], row["vram"]), (8, 4))
+        reloaded = Workspace(
+            self.job, self.output, lambda *_: dict(self.state), self.workspace.monitor
+        )
+        self.assertEqual(reloaded.history[-1]["ram"], 8)
+        self.workspace.monitor.snapshot = lambda: {
+            "sampled_at": time.time(),
+            "cpu_percent": 15,
+            "gpu": None,
+        }
+        self.workspace.last_history = 0
+        data = self.workspace.refresh()
+        self.assertEqual(data["history"][-1]["cpu"], 15)
+        self.assertIsNone(data["history"][-1]["gpu"])
+        self.assertEqual(data["history"][-2]["vram"], 4)
+        self.workspace.monitor.snapshot = lambda: {"sampled_at": 1, "cpu_percent": 90}
+        self.workspace.last_history = 0
+        self.workspace.refresh()
+        self.assertIsNone(self.workspace.history[-1]["cpu"])
+
+    def test_local_chart_assets_are_served(self):
+        for asset in (
+            "monitor.js",
+            "monitor.css",
+            "vendor/uPlot.iife.min.js",
+            "vendor/uPlot.min.css",
+        ):
+            with urllib.request.urlopen(self.base + "/" + asset) as response:
+                self.assertEqual(response.status, 200)
+                self.assertGreater(len(response.read()), 50)
+        with self.assertRaises(urllib.error.HTTPError):
+            urllib.request.urlopen(self.base + "/vendor/../../AGENTS.md")
+
     def test_chapters_reviews_and_audio_range(self):
         with urllib.request.urlopen(self.base + "/api/workspace") as response:
             d = json.load(response)
