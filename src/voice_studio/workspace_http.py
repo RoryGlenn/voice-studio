@@ -114,7 +114,14 @@ def make_handler(default_workspace, port, library=None):
                         .encode(),
                         "text/html; charset=utf-8",
                     )
-                elif path in ("/app.js", "/style.css"):
+                elif path in (
+                    "/app.js",
+                    "/style.css",
+                    "/monitor.js",
+                    "/monitor.css",
+                    "/vendor/uPlot.iife.min.js",
+                    "/vendor/uPlot.min.css",
+                ):
                     self.file(STATIC / path[1:])
                 elif path in ("/api/progress", "/api/workspace"):
                     self.json(workspace.snapshot())

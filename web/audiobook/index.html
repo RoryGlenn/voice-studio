@@ -1,4 +1,4 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="workspace-token" content="__TOKEN__"><title>Audiobook workspace</title><link rel="stylesheet" href="/style.css"></head><body>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="workspace-token" content="__TOKEN__"><title>Audiobook workspace</title><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/vendor/uPlot.min.css"><link rel="stylesheet" href="/monitor.css"></head><body>
 <header class="topbar"><a class="brand" href="#overview">VOICE STUDIO <span>/ Audiobooks</span></a><span id="connection" role="status">Connecting…</span></header>
 <main>
 <section class="library"><label for="book-select">Book library</label><select id="book-select"><option>Loading books…</option></select><p id="job-name" class="muted"></p><div id="library-error" role="status"></div></section>
@@ -13,38 +13,17 @@
 </section>
 <section id="review" class="view" hidden><div class="section-title"><div><h2>A careful second listen</h2><p class="muted">Compare the wording, listen, then decide. Pause the conversion before changing a passage.</p></div><span id="review-summary"></span></div><label class="filter">Filter <select id="review-filter"><option value="all">All flagged passages</option><option value="wording">Wording differences</option><option value="timing">Timing or signal issues</option></select></label><div id="review-list"></div></section>
 <section id="system" class="view" hidden>
-<section class="card monitor" aria-label="Live system monitor">
-    <div class="row"><strong>Live system monitor</strong><span id="activity-status" class="small">Sampling…</span></div>
-    <p class="small">Whole-computer activity · updates every 2 seconds · graphs cover the last 2 minutes while open</p>
-    <div class="monitor-grid">
-      <div class="monitor-panel">
-        <div class="row"><strong>CPU</strong><span id="cpu-load">—</span></div>
-        <progress id="cpu-bar" max="100" value="0" aria-label="CPU utilization"></progress>
-        <svg class="activity-chart" viewBox="0 0 300 100" role="img" aria-label="Recent CPU utilization from 0 to 100 percent"><polyline id="cpu-trend" fill="none" stroke="#79dfb1" stroke-width="2" points="" /></svg>
-        <p class="small">Each logical CPU, 0–100%</p>
-        <pre id="cpu-cores" aria-label="Per-core CPU usage">Sampling…</pre>
-      </div>
-      <div class="monitor-panel">
-        <div class="row"><strong>GPU</strong><span id="gpu-load">—</span></div>
-        <progress id="gpu-bar" max="100" value="0" aria-label="GPU utilization"></progress>
-        <svg class="activity-chart" viewBox="0 0 300 100" role="img" aria-label="Recent GPU utilization from 0 to 100 percent"><polyline id="gpu-trend" fill="none" stroke="#8bbcff" stroke-width="2" points="" /></svg>
-        <p id="gpu-details" class="small">Waiting for GPU readings…</p>
-        <div class="row"><strong>GPU memory</strong><span id="vram-load">—</span></div>
-        <progress id="vram-bar" max="100" value="0" aria-label="GPU memory usage"></progress>
-      </div>
-      <div class="monitor-panel">
-        <div class="row"><strong>RAM</strong><span id="ram-load">—</span></div>
-        <progress id="ram-bar" max="100" value="0" aria-label="RAM utilization"></progress>
-        <svg class="activity-chart" viewBox="0 0 300 100" role="img" aria-label="Recent RAM utilization from 0 to 100 percent"><polyline id="ram-trend" fill="none" stroke="#d6b0ff" stroke-width="2" points="" /></svg>
-        <p id="ram-details" class="small">Sampling…</p>
-        <p id="swap-details" class="small"></p>
-      </div>
-      <div class="monitor-panel">
-        <div class="row"><strong>Top processes</strong><span class="small">CPU / RAM</span></div>
-        <p class="small">CPU: 100% = one logical core. RAM: resident memory. Names only; command arguments are not displayed.</p>
-        <pre id="process-list" aria-label="Top processes by CPU usage">Sampling…</pre>
-      </div>
-    </div>
+<section class="monitor" aria-label="Live system monitor">
+<div class="monitor-heading"><div><div class="eyebrow">WORKSTATION TELEMETRY</div><h2>System activity</h2><p class="muted">Whole computer · sampled every 2 seconds · hover or use arrow keys to inspect</p></div><div class="range-control" role="group" aria-label="Chart time range"><button data-range="120" aria-pressed="true">2 min</button><button data-range="900" aria-pressed="false">15 min</button><button data-range="3600" aria-pressed="false">1 hour</button></div></div>
+<p id="activity-status" role="status" class="muted">Waiting for a sample…</p>
+<div class="telemetry-grid">
+<article class="telemetry-card" style="--series-color:#8cdbb5"><div class="metric-heading"><h3>CPU</h3><strong id="cpu-load">—</strong></div><p class="metric-details" id="cpu-details">Waiting for readings…</p><div id="cpu-chart" class="telemetry-chart" tabindex="0" role="group" aria-label="CPU history. Use left and right arrow keys to inspect samples."></div><div class="metric-stats"><span id="cpu-stats">Average — · Peak —</span><span id="cpu-hover" aria-live="off">Hover to inspect</span></div></article>
+<article class="telemetry-card" style="--series-color:#91baff"><div class="metric-heading"><h3>GPU</h3><strong id="gpu-load">—</strong></div><p class="metric-details" id="gpu-details">Waiting for readings…</p><div id="gpu-chart" class="telemetry-chart" tabindex="0" role="group" aria-label="GPU history. Use left and right arrow keys to inspect samples."></div><div class="metric-stats"><span id="gpu-stats">Average — · Peak —</span><span id="gpu-hover" aria-live="off">Hover to inspect</span></div></article>
+<article class="telemetry-card" style="--series-color:#c9a4f3"><div class="metric-heading"><h3>Memory</h3><strong id="ram-load">—</strong></div><p class="metric-details" id="ram-details">Waiting for readings…</p><div id="ram-chart" class="telemetry-chart" tabindex="0" role="group" aria-label="Memory history. Use left and right arrow keys to inspect samples."></div><div class="metric-stats"><span id="ram-stats">Average — · Peak —</span><span id="ram-hover" aria-live="off">Hover to inspect</span></div></article>
+<article class="telemetry-card" style="--series-color:#efc28b"><div class="metric-heading"><h3>GPU memory</h3><strong id="vram-load">—</strong></div><p class="metric-details" id="vram-details">Waiting for readings…</p><div id="vram-chart" class="telemetry-chart" tabindex="0" role="group" aria-label="GPU memory history. Use left and right arrow keys to inspect samples."></div><div class="metric-stats"><span id="vram-stats">Average — · Peak —</span><span id="vram-hover" aria-live="off">Hover to inspect</span></div></article>
+</div>
+<section class="worker-timeline"><div class="section-title"><h3>Worker timeline</h3><span class="muted">Observed states · same time range as charts</span></div><div id="state-timeline" aria-label="Observed worker state timeline"></div><p id="timeline-details" class="muted"></p></section>
+<div class="monitor-bottom"><section class="telemetry-card"><div class="section-title"><h3>Logical CPU cores</h3><span class="muted">0–100% each</span></div><div id="cpu-cores" class="core-grid"></div><p class="muted">Light tiles indicate busier cores. Total CPU is averaged across all cores.</p></section><section class="telemetry-card"><div class="section-title"><h3>Top processes</h3><span id="swap-details" class="muted"></span></div><p class="muted">Busiest processes by CPU · sort the displayed rows · 100% = one core · RAM: resident memory</p><div class="process-scroll"><table class="process-table"><thead><tr><th><button data-sort="name">Process</button></th><th><button data-sort="pid">PID</button></th><th aria-sort="descending"><button data-sort="cpu_percent">CPU % ↓</button></th><th><button data-sort="rss">RAM MiB</button></th></tr></thead><tbody id="process-list"></tbody></table></div></section></div>
 </section>
 <div class="system-details"><div><h2>Worker health</h2><dl><dt>Heartbeat</dt><dd id="heartbeat">—</dd><dt>Consecutive retries</dt><dd id="retries">—</dd><dt>Final file</dt><dd id="output">—</dd><dt>Passed checks</dt><dd id="verified">—</dd><dt>Flagged</dt><dd id="held-count">—</dd><dt>Generated, awaiting checks</dt><dd id="awaiting">—</dd><dt>Total still to check</dt><dd id="unchecked">—</dd></dl><p id="next-step"></p></div><div><div class="section-title"><h2>Worker log</h2><button id="refresh-log" class="secondary">Refresh log</button></div><pre id="worker-log">Select Refresh log to read the latest worker output.</pre></div></div>
 </section>
@@ -54,4 +33,4 @@
 </main>
 <dialog id="listen-dialog"><button class="close secondary" id="close-listen" aria-label="Close player">Close</button><div class="eyebrow">LISTEN TO YOUR BOOK</div><h2 id="listen-title"></h2><label>Passage <select id="passage-select"></select></label><p id="passage-text"></p><audio id="player" controls preload="metadata"></audio><p id="player-status" class="muted"></p></dialog>
 <dialog id="review-dialog"><button class="close secondary" id="close-review">Close</button><h2>Record your listening review</h2><p>Enter the words you actually heard. The existing strict checker will validate them. Timing problems may still require regeneration.</p><label>Words heard<textarea id="heard-text" rows="6"></textarea></label><label>Why is this acceptable?<textarea id="review-note" rows="3" placeholder="Describe what you confirmed by listening."></textarea></label><button id="submit-review">Save listening review</button><p id="review-error" role="status"></p></dialog>
-<script src="/app.js"></script></body></html>
+<script src="/vendor/uPlot.iife.min.js"></script><script src="/monitor.js"></script><script src="/app.js"></script></body></html>

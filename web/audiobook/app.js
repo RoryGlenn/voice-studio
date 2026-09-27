@@ -1,48 +1,5 @@
 'use strict';
 const $ = id => document.getElementById(id);
-let activitySamples = [], lastActivity = null;
-  function activity(data) {
-    const fresh = data && data.sampled_at != null && Date.now() / 1000 - data.sampled_at < 10;
-    const cpu = fresh ? data.cpu_percent : null;
-    const gpu = fresh ? data.gpu : null;
-    const gpuLoad = gpu ? gpu.utilization : null;
-    const memory = fresh ? data.memory : null;
-    const ram = memory ? memory.percent : null;
-    const gib = value => `${(value / 1073741824).toFixed(1)} GiB`;
-    $('ram-load').textContent = ram == null ? 'Unavailable' : `${ram.toFixed(1)}%`;
-    $('ram-bar').value = ram == null ? 0 : ram;
-    $('ram-details').textContent = memory ? `${gib(memory.used)} used / ${gib(memory.total)} total · ${gib(memory.available)} available` : 'RAM readings unavailable';
-    $('swap-details').textContent = memory ? `Swap: ${gib(memory.swap_used)} / ${gib(memory.swap_total)}` : '';
-    const vram = gpu && gpu.memory_total > 0 && gpu.memory_used != null ? gpu.memory_used / gpu.memory_total * 100 : null;
-    $('vram-load').textContent = vram == null ? 'Unavailable' : `${vram.toFixed(1)}%`;
-    $('vram-bar').value = vram == null ? 0 : vram;
-    const coreRows = (fresh && data.cores || []).map(core => {
-      const filled = core.percent == null ? 0 : Math.round(core.percent / 10);
-      return `${core.name.padEnd(5)} ${'█'.repeat(filled)}${'░'.repeat(10 - filled)} ${core.percent == null ? '   —' : core.percent.toFixed(0).padStart(3) + '%'}`;
-    });
-    const paired = [];
-    for (let i = 0; i < coreRows.length; i += 2) paired.push(coreRows[i] + (coreRows[i + 1] ? '  ' + coreRows[i + 1] : ''));
-    $('cpu-cores').textContent = paired.join('\n') || 'Per-core readings unavailable';
-    const processes = fresh ? data.processes : null;
-    $('process-list').textContent = processes ? '   PID  CPU %  RAM MiB  NAME\n' + processes.map(p => `${String(p.pid).padStart(6)} ${p.cpu_percent == null ? '     —' : p.cpu_percent.toFixed(1).padStart(6)} ${Math.round(p.rss / 1048576).toString().padStart(8)}  ${p.name}`).join('\n') : 'Process readings unavailable';
-    for (const [name, value] of [['cpu', cpu], ['gpu', gpuLoad]]) {
-      $(name + '-load').textContent = value == null ? 'Unavailable' : `${value.toFixed(1)}%`;
-      $(name + '-bar').value = value == null ? 0 : value;
-    }
-    $('activity-status').textContent = fresh ? `Updated ${new Date(data.sampled_at * 1000).toLocaleTimeString()}` : 'Activity readings unavailable';
-    $('gpu-details').textContent = gpu ? `${gpu.name} · VRAM ${gpu.memory_used == null ? 'unavailable' : (gpu.memory_used / 1024).toFixed(1) + ' GiB'} / ${gpu.memory_total == null ? 'unavailable' : (gpu.memory_total / 1024).toFixed(1) + ' GiB'} · ${gpu.temperature == null ? 'Temperature unavailable' : gpu.temperature + ' °C'}` : 'GPU readings unavailable';
-    if (!fresh || cpu == null || gpuLoad == null) activitySamples = [];
-    if (fresh && data.sampled_at !== lastActivity) {
-      if (lastActivity != null && data.sampled_at - lastActivity > 10) activitySamples = [];
-      activitySamples.push({time: data.sampled_at, cpu, gpu: gpuLoad, ram});
-      lastActivity = data.sampled_at;
-    }
-    activitySamples = activitySamples.filter(s => fresh && data.sampled_at - s.time <= 120);
-    for (const name of ['cpu', 'gpu', 'ram']) {
-      const points = activitySamples.filter(s => s[name] != null).map(s => `${300 - (data.sampled_at - s.time) * 2.5},${100 - s[name]}`).join(' ');
-      $(name + '-trend').setAttribute('points', points);
-    }
-  }
 let current = null, selectedReview = null, reviewSignature = '', chapterSignature = '', passages = [], lastEvent = 0;
 const base = location.pathname.startsWith('/jobs/') ? location.pathname.replace(/\/$/, '') : '';
 const route = path => base + path;
@@ -57,6 +14,7 @@ function setView(name) {
   document.querySelectorAll('.view').forEach(el => {el.hidden = el.id !== name;});
   document.querySelectorAll('[data-view]').forEach(el => {const active = el.dataset.view === name; el.classList.toggle('active', active); el.setAttribute('aria-pressed', String(active));});
   history.replaceState(null, '', '#' + name);
+  if(name==='system')requestAnimationFrame(()=>SystemMonitor.render());
 }
 function show(data) {
   if (!data.book) return;
@@ -84,8 +42,7 @@ function show(data) {
   $('last-save').textContent = `Last save ${age(data.saved_age_seconds)}`;
   const load = data.activity || {}; const gpu = load.gpu || {};
   $('compact-load').textContent = `${load.cpu_percent == null ? '—' : Math.round(load.cpu_percent)}% CPU · ${gpu.utilization == null ? '—' : Math.round(gpu.utilization)}% GPU`;
-  if (!activitySamples.length && data.history) activitySamples = data.history.filter(h => Date.now()/1000-h.at<120).map(h=>({time:h.at,cpu:h.cpu,gpu:h.gpu,ram:null}));
-  activity(load);
+  SystemMonitor.update(data);
   const phase = data.download_ready ? 3 : data.state === 'packaging' ? 2 : data.remaining === 0 ? 1 : 0;
   ['rendering','checking','packaging','complete'].forEach((name,i)=>{const el=$('step-'+name);el.classList.toggle('active',i===phase);el.classList.toggle('done',i<phase);});
   $('package-label').textContent = data.download_ready ? 'Validated' : data.state === 'packaging' ? 'Building files' : 'Waiting';
@@ -172,7 +129,7 @@ setView(location.hash.slice(1));
 const events=new EventSource(route('/events'));
 events.onmessage=event=>{try{show(JSON.parse(event.data));lastEvent=Date.now();}catch(error){$('connection').textContent='Display update failed';console.error(error);}};
 events.onerror=()=>{$('connection').textContent='Reconnecting…';};
-async function fallback(){if(Date.now()-lastEvent>8000){try{const response=await fetch(route('/api/workspace'));if(!response.ok)throw Error('Unavailable');show(await response.json());lastEvent=Date.now();}catch{$('connection').textContent='Connection lost · saved progress retained';activity(null);}}}
+async function fallback(){if(Date.now()-lastEvent>8000){try{const response=await fetch(route('/api/workspace'));if(!response.ok)throw Error('Unavailable');show(await response.json());lastEvent=Date.now();}catch{$('connection').textContent='Connection lost · saved progress retained';SystemMonitor.disconnected();}}}
 fallback();setInterval(fallback,5000);
 
 async function loadLibrary(){
