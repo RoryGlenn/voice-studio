@@ -3,6 +3,13 @@ const $ = id => document.getElementById(id);
 let current = null, selectedReview = null, reviewSignature = '', chapterSignature = '', passages = [], lastEvent = 0;
 const base = location.pathname.startsWith('/jobs/') ? location.pathname.replace(/\/$/, '') : '';
 const route = path => base + path;
+const themeSelect = $('theme-select');
+themeSelect.value = document.documentElement.dataset.theme || 'forest';
+themeSelect.addEventListener('change', () => {
+  document.documentElement.dataset.theme = themeSelect.value;
+  try { localStorage.setItem('voice-studio-theme', themeSelect.value); } catch {}
+  document.dispatchEvent(new Event('themechange'));
+});
 document.querySelector('.cover').src = route('/cover');
 $('download').href = route('/download');
 
@@ -14,7 +21,7 @@ function setView(name) {
   document.querySelectorAll('.view').forEach(el => {el.hidden = el.id !== name;});
   document.querySelectorAll('[data-view]').forEach(el => {const active = el.dataset.view === name; el.classList.toggle('active', active); el.setAttribute('aria-pressed', String(active));});
   history.replaceState(null, '', '#' + name);
-  if(name==='system')requestAnimationFrame(()=>SystemMonitor.render());
+  if(name==='system'){requestAnimationFrame(()=>SystemMonitor.render());refreshWorkerLog();}
 }
 function show(data) {
   if (!data.book) return;
@@ -124,7 +131,30 @@ $('close-listen').addEventListener('click',()=>$('listen-dialog').close());
 $('listen-dialog').addEventListener('close',()=>$('player').pause());
 $('close-review').addEventListener('click',()=>$('review-dialog').close());
 $('player').addEventListener('ended',()=>{const index=passages.findIndex(p=>p.id===$('passage-select').value);const next=passages[index+1];if(next&&next.status!=='pending'){$('passage-select').value=next.id;selectPassage();$('player').play().catch(()=>{});}});
-$('refresh-log').addEventListener('click',async()=>{try{const response=await fetch(route('/api/log'));const data=await response.json();$('worker-log').textContent=data.lines?data.lines.join('\n'):data.error;}catch(error){$('worker-log').textContent=error.message;}});
+let logLoading = false, logLoaded = false;
+async function refreshWorkerLog() {
+  if (logLoading || document.hidden || $('system').hidden) return;
+  logLoading = true;
+  const log = $('worker-log');
+  try {
+    const response = await fetch(route('/api/log'), {cache:'no-store', signal:AbortSignal.timeout(8000)});
+    const data = await response.json();
+    if (!response.ok || !Array.isArray(data.lines)) throw Error(data.error || 'Worker log unavailable');
+    const follow = !logLoaded || log.scrollHeight - log.scrollTop - log.clientHeight < 24;
+    const top = log.scrollTop, text = data.lines.join('\n') || 'No worker output yet.';
+    if (log.textContent !== text) {
+      log.textContent = text;
+      log.scrollTop = follow ? log.scrollHeight : top;
+    }
+    logLoaded = true;
+    $('log-status').textContent = 'Updates every 2 seconds · Last checked ' + new Date().toLocaleTimeString();
+  } catch (error) {
+    $('log-status').textContent = 'Log unavailable · retrying automatically: ' + error.message;
+  } finally { logLoading = false; }
+}
+$('refresh-log').addEventListener('click', refreshWorkerLog);
+document.addEventListener('visibilitychange', refreshWorkerLog);
+setInterval(refreshWorkerLog, 2000);
 setView(location.hash.slice(1));
 const events=new EventSource(route('/events'));
 events.onmessage=event=>{try{show(JSON.parse(event.data));lastEvent=Date.now();}catch(error){$('connection').textContent='Display update failed';console.error(error);}};
