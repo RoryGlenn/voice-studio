@@ -19,3 +19,8 @@ assert.equal(elements['ram-load'].textContent,'Unavailable');
 assert.equal(elements['gpu-trend'].points,'');
 assert.equal(elements['process-list'].textContent,'Process readings unavailable');
 console.log('Workspace monitor rendering and unavailable-state checks passed.');
+
+const diffContext = {};
+runInNewContext(source.slice(source.indexOf('const escapeHtml'), source.indexOf('function setView')) + source.slice(source.indexOf('function diffMarkup'), source.indexOf('function renderReview')), diffContext);
+assert.equal(diffContext.diffMarkup([{text:'<script>',changed:true},{text:' & safe',changed:false}], ''), '<mark>&lt;script&gt;</mark> &amp; safe');
+console.log('Review highlighting safely escapes transcript text.');

@@ -67,6 +67,18 @@ elif stage=='packaging':
             len(list((self.job / "worker-logs").glob("*-rendering.log"))), 2
         )
         self.assertEqual(progress(self.job, self.output)["render_percent"], 100)
+        history = [
+            json.loads(line)
+            for line in (self.job / "worker-history.jsonl").read_text().splitlines()
+        ]
+        rendering = [row for row in history if row["stage"] == "rendering"]
+        self.assertEqual(len(rendering), 2)
+        self.assertNotEqual(rendering[0]["exit_code"], 0)
+        self.assertEqual(rendering[1]["exit_code"], 0)
+        self.assertEqual(rendering[1]["before"]["pending"], 1)
+        self.assertEqual(rendering[1]["after"]["pending"], 0)
+        self.assertGreater(rendering[1]["seconds"], 0)
+        self.assertEqual(rendering[1]["render_batch_size"], 20)
 
     def test_retry_limit_persists_across_supervisor_restart(self):
         pipeline = Pipeline(self.job, self.output, retry_limit=2, backoff=0)

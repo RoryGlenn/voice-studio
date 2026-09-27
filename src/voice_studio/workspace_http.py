@@ -8,12 +8,12 @@ import subprocess
 import time
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 STATIC = Path(__file__).resolve().parents[2] / "web" / "audiobook"
 
 
-def make_handler(workspace, port):
+def make_handler(default_workspace, port, library=None):
     token = secrets.token_urlsafe(32)
     allowed_hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
 
@@ -87,13 +87,26 @@ def make_handler(workspace, port):
                     self.wfile.write(chunk)
                     remaining -= len(chunk)
 
+        def selected(self):
+            url = urlsplit(self.path)
+            path = url.path
+            workspace = default_workspace
+            if path.startswith("/jobs/"):
+                parts = path.split("/", 3)
+                if library is None or len(parts) != 4:
+                    raise ValueError("Unknown book job")
+                workspace = library.get(unquote(parts[2]))
+                path = "/" + parts[3]
+            return workspace, path, parse_qs(url.query)
+
         def do_GET(self):
             if not self.allowed():
                 return
-            url = urlsplit(self.path)
-            query = parse_qs(url.query)
             try:
-                if url.path == "/":
+                workspace, path, query = self.selected()
+                if path == "/api/library" and library is not None:
+                    self.json(library.listing())
+                elif path == "/":
                     self.send_data(
                         (STATIC / "index.html")
                         .read_text()
@@ -101,13 +114,13 @@ def make_handler(workspace, port):
                         .encode(),
                         "text/html; charset=utf-8",
                     )
-                elif url.path in ("/app.js", "/style.css"):
-                    self.file(STATIC / url.path[1:])
-                elif url.path in ("/api/progress", "/api/workspace"):
+                elif path in ("/app.js", "/style.css"):
+                    self.file(STATIC / path[1:])
+                elif path in ("/api/progress", "/api/workspace"):
                     self.json(workspace.snapshot())
-                elif url.path == "/api/passages":
+                elif path == "/api/passages":
                     self.json(workspace.passages(int(query["chapter"][0])))
-                elif url.path == "/api/log":
+                elif path == "/api/log":
                     health = json.loads(
                         (workspace.job / "pipeline-status.json").read_text()
                     )
@@ -122,15 +135,15 @@ def make_handler(workspace, port):
                             handle.read().decode(errors="replace").splitlines()[-50:]
                         )
                     self.json({"lines": lines})
-                elif url.path == "/audio":
+                elif path == "/audio":
                     self.file(workspace.safe_audio(query["id"][0]), "audio/wav")
-                elif url.path == "/cover":
+                elif path == "/cover":
                     self.file(workspace.job / "cover.png", "image/png")
-                elif url.path == "/download":
+                elif path == "/download":
                     if not workspace.final_ready(workspace.snapshot().get("state")):
                         raise ValueError("Validated audiobook is not ready")
                     self.file(workspace.output / "audiobook.m4b", "audio/mp4", True)
-                elif url.path == "/events":
+                elif path == "/events":
                     self.send_response(200)
                     self.send_header("Content-Type", "text/event-stream")
                     self.send_header("Cache-Control", "no-store")
@@ -161,10 +174,15 @@ def make_handler(workspace, port):
                     {"error": "Refresh this local page before using controls"}, 403
                 )
                 return
-            if self.path != "/api/action":
-                self.send_error(404)
-                return
             try:
+                workspace, path, _ = self.selected()
+                if path != "/api/action":
+                    self.send_error(404)
+                    return
+                if not workspace.controls_enabled:
+                    raise ValueError(
+                        "This job is view-only; configure its workspace service first"
+                    )
                 length = int(self.headers.get("Content-Length", "0"))
                 if not 0 < length <= 32000:
                     raise ValueError("Invalid request size")

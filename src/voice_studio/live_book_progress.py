@@ -261,14 +261,19 @@ class ActivityMonitor:
 
 
 def serve(job: Path, output: Path, port: int, service: str | None = None) -> None:
-    from voice_studio.audiobook_workspace import Workspace
+    from voice_studio.audiobook_workspace import Workspace, atomic
     from voice_studio.workspace_http import make_handler
+    from voice_studio.workspace_library import Library
 
     monitor = ActivityMonitor()
     monitor.sample()
     workspace = Workspace(job, output, progress, monitor, service)
     workspace.refresh()
-    server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(workspace, port))
+    atomic(job / "dashboard-config.json", {"output": str(output), "service": service})
+    library = Library(workspace)
+    server = ThreadingHTTPServer(
+        ("127.0.0.1", port), make_handler(workspace, port, library)
+    )
     threading.Thread(target=monitor.run, daemon=True).start()
     threading.Thread(target=workspace.run, daemon=True).start()
     print(f"Audiobook workspace: http://127.0.0.1:{server.server_port}/", flush=True)
