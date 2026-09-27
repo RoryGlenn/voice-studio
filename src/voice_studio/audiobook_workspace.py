@@ -11,6 +11,8 @@ import threading
 import time
 from pathlib import Path
 
+from voice_studio.workspace_insights import insights, wording_diff
+
 REPO = Path(__file__).resolve().parents[2]
 
 
@@ -37,6 +39,7 @@ class Workspace:
         self.cache, self.snapshot_value = {}, {}
         self.lock, self.action_lock = threading.Lock(), threading.Lock()
         self.action = {"state": "idle", "message": ""}
+        self.controls_enabled = True
         self.history_path = job / "dashboard-history.json"
         try:
             self.history = json.loads(self.history_path.read_text())[-720:]
@@ -116,6 +119,8 @@ class Workspace:
     def refresh(self):
         data = self.progress_reader(self.job, self.output)
         data["activity"] = self.monitor.snapshot()
+        if (self.job / "paused").exists() and data["state"] == "stopped":
+            data["state"], data["stage"] = "paused", "Paused"
         chapters, review, recent = [], [], []
         audio_seconds = 0
         for track in self.plan["tracks"]:
@@ -162,6 +167,9 @@ class Workspace:
                             "chapter": track["title"],
                             "expected": segment["speech_text"],
                             "recognized": wording.get("recognized", ""),
+                            "diff": wording_diff(
+                                segment["speech_text"], wording.get("recognized", "")
+                            ),
                             "reasons": reasons,
                             "fingerprint": row["raw_sha256"],
                             "attempt": row["attempt"] + 1,
@@ -201,7 +209,14 @@ class Workspace:
             gained = data[phase_key] - oldest[phase_key]
             if elapsed >= 60 and gained >= 3:
                 estimate = (data["total"] - data[phase_key]) * elapsed / gained
+        ready = self.final_ready(data["state"])
+        data.update(insights(self.job, self.output, data, ready))
         data.update(
+            job_id=self.job.name,
+            controls_enabled=self.controls_enabled,
+            settings={
+                key: self.plan.get(key) for key in ("engine", "narrator", "year")
+            },
             book={
                 "title": self.plan["title"],
                 "author": self.plan["author"],
@@ -215,7 +230,7 @@ class Workspace:
             history=self.history[-60:],
             estimate_seconds=estimate,
             pause_requested=(self.job / "paused").exists(),
-            download_ready=self.final_ready(data["state"]),
+            download_ready=ready,
             action=dict(self.action),
             resume_supported=bool(self.service),
         )
@@ -248,6 +263,8 @@ class Workspace:
             return True
 
     def request(self, payload):
+        if not self.controls_enabled:
+            raise ValueError("This job is view-only")
         action = payload.get("action")
         if action not in ("pause", "resume", "approve", "regenerate"):
             raise ValueError("Unknown action")

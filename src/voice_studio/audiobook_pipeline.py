@@ -70,6 +70,8 @@ class Pipeline:
         log = logs / f"{time.time_ns()}-{stage}.log"
         self.state["log"] = str(log)
         started = changed = time.monotonic()
+        started_at = time.time()
+        before = self.history_counts()
         stamp = None
         timed_out = False
         with log.open("wb") as handle:
@@ -103,7 +105,30 @@ class Pipeline:
             detail = handle.read().decode(errors="replace")
         if timed_out:
             detail += "\nWorker exceeded progress timeout"
+        entry = {
+            "started_at": started_at,
+            "finished_at": time.time(),
+            "seconds": round(time.monotonic() - started, 3),
+            "stage": stage,
+            "exit_code": code,
+            "timed_out": timed_out,
+            "render_batch_size": self.batch,
+            "check_batch_size": self.check_batch,
+            "cuda_cache_size": os.environ.get("VOICE_STUDIO_CUDA_CONV_CACHE_SIZE"),
+            "before": before,
+            "after": self.history_counts(),
+        }
+        with (self.job / "worker-history.jsonl").open("a") as history:
+            history.write(json.dumps(entry) + "\n")
+            history.flush()
+            os.fsync(history.fileno())
         return code, detail
+
+    def history_counts(self):
+        try:
+            return json.loads((self.job / "status.json").read_text())["counts"]
+        except (OSError, ValueError, KeyError):
+            return {}
 
     def wait_for_gpu(self) -> bool:
         """Yield to interactive GPU users between workers; do not kill their apps."""
