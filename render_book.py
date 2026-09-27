@@ -8,6 +8,7 @@ import difflib
 import fcntl
 import hashlib
 import json
+import os
 import re
 import subprocess
 import time
@@ -47,8 +48,16 @@ def save_json(path: Path, value: Any) -> None:
     """Atomically save a JSON checkpoint without truncating the previous one."""
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(json.dumps(value, indent=2, ensure_ascii=False))
+    with temporary.open("w") as handle:
+        handle.write(json.dumps(value, indent=2, ensure_ascii=False))
+        handle.flush()
+        os.fsync(handle.fileno())
     temporary.replace(path)
+    descriptor = os.open(path.parent, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 def save_checkpoint(

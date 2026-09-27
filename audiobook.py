@@ -7,6 +7,7 @@ import contextlib
 import gc
 import importlib
 import json
+import os
 import re
 import time
 from pathlib import Path
@@ -254,6 +255,52 @@ def status(job: Path, plan: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def recover_checkpoints(job: Path, plan: dict[str, Any]) -> None:
+    """Preserve unreadable JSON; restore valid original evidence, never bypass hashes."""
+    damaged = []
+    for path in (job / "segments").rglob("*.json"):
+        try:
+            json.loads(path.read_text())
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            damaged.append(path)
+    # If an original attempt is unreadable, preserve its derived checkpoint too.
+    for track in plan["tracks"]:
+        for segment in track["segments"]:
+            path = record_path(track, segment, job)
+            if path.exists() and path not in damaged:
+                row = json.loads(path.read_text())
+                raw = row.get("raw_file")
+                if raw and Path(raw).with_suffix(".json") in damaged:
+                    damaged.append(path)
+    if damaged:
+        backup = job / "recovery" / str(time.time_ns())
+        for path in damaged:
+            target = backup / path.relative_to(job)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            path.replace(target)
+    for track in plan["tracks"]:
+        for segment in track["segments"]:
+            path = record_path(track, segment, job)
+            if path.exists():
+                # A valid JSON record with altered evidence must stop, not regenerate.
+                validate_record(json.loads(path.read_text()), track, segment, plan)
+                continue
+            originals = sorted(
+                (path.parent / "attempts").glob(f"{segment['number']:04d}-*.json")
+            )
+            originals = [
+                p
+                for p in originals
+                if p.stem.count("-") == 1 and p.stem.split("-")[-1].isdigit()
+            ]
+            if originals:
+                row = json.loads(originals[-1].read_text())
+                row["attempt_sha256"] = file_hash(originals[-1])
+                validate_record(row, track, segment, plan)
+                save_json(path, row)
+    save_json(job / "status.json", status(job, plan))
+
+
 def render(
     job: Path,
     plan: dict[str, Any],
@@ -346,6 +393,8 @@ def render(
                             "An interrupted raw attempt exists; preserve it and prepare an explicit repair before continuing"
                         )
                     sf.write(raw, wave, RATE, subtype="FLOAT")
+                    with raw.open("rb") as handle:
+                        os.fsync(handle.fileno())
                     row = {
                         "identity": plan["identity_sha256"],
                         "track": track["track"],
@@ -439,6 +488,8 @@ def apply_check(
     paced = insert_pauses(raw, points)
     target = Path(row["raw_file"]).with_suffix(".paced.wav")
     sf.write(target, paced, RATE, subtype="FLOAT")
+    with target.open("rb") as handle:
+        os.fsync(handle.fileno())
     result.update(
         status="verified",
         paced_file=str(target),
@@ -588,6 +639,7 @@ def main() -> None:
         "status",
         "pause",
         "resume",
+        "recover",
     ):
         action = sub.add_parser(name)
         action.add_argument("--job", type=Path, required=True)
@@ -631,7 +683,9 @@ def main() -> None:
         return
     with job_lease(job):
         plan = load_plan(job)
-        if args.command in {"render", "resume"}:
+        if args.command == "recover":
+            recover_checkpoints(job, plan)
+        elif args.command in {"render", "resume"}:
             if args.max_segments is not None and args.max_segments <= 0:
                 parser.error("--max-segments must be positive")
             if args.command == "resume":

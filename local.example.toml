@@ -8,3 +8,4 @@ studio_data_dir = "data/studio"
 # [runtime]
 # backend = "cuda"
 # memory_mib = 4096  # Soft allocator guideline, not a hard VRAM limit.
+# cuda_conv_cache_size = 512  # Increase for long jobs if MLX reports cache thrashing.

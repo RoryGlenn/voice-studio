@@ -87,7 +87,7 @@ python3 run.py doctor
 
 `doctor` checks actual GPU kernel compilation, encoder tools, reference checksums, primary model weights, text-tokenizer loading, and the pinned offline speech tokenizer. `doctor --kernel-only` checks the runtime without claiming voice readiness. Model loading and conditioning are additionally checked before actual generation. The browser server retains loopback binding and session-token authentication; remote access should use SSH port forwarding, with the printed token-bearing launch URL.
 
-Linux defaults disable CUDA graphs, set the MLX cache limit to zero, use a 4096 MiB **soft** memory guideline, and set the convolution cache to 512. These preserve model precision; they do not promise a hard VRAM ceiling. The convolution setting also supports the saved Expressive engine on the tested GPU. Optional `[runtime]` values in `local.toml` are `backend = "cuda"` or `"metal"`, and `memory_mib = 4096`; `VOICE_STUDIO_BACKEND` and `VOICE_STUDIO_MEMORY_MIB` override them. An unavailable selected GPU fails explicitly.
+Linux defaults disable CUDA graphs, set the MLX cache limit to zero, use a 4096 MiB **soft** memory guideline, and set the convolution cache to 512. These preserve model precision; they do not promise a hard VRAM ceiling. For longer jobs that exhaust the convolution cache, set `VOICE_STUDIO_CUDA_CONV_CACHE_SIZE=2048` for both preparation and every later stage. Optional `[runtime]` values in `local.toml` are `backend = "cuda"` or `"metal"`, `memory_mib = 4096`, and `cuda_conv_cache_size = 512`; matching `VOICE_STUDIO_` environment variables override them. Runtime settings are part of each audiobook job's frozen identity, so keep an override consistent when resuming that job. An unavailable selected GPU fails explicitly.
 
 The shared GPU lock defaults to `~/.local/state/voice-studio/gpu.lock` (or `$XDG_STATE_HOME/voice-studio/gpu.lock`). `VOICE_STUDIO_GPU_LOCK` may select one common lock path for installations sharing a GPU. Do not give competing installations different lock paths. Models and recognizer caches are released before relinquishing ownership, including ordinary Python exception paths. A native-process abort is recovered by the OS releasing the lock; rerun the interrupted stage to resume its saved checkpoints.
 
@@ -112,6 +112,10 @@ Preparation preserves source locations, paragraph and heading roles, an omission
 ```sh
 python3 run.py audiobook repair --job /path/to/new-job --segment 1/3 --seed-offset 1000
 ```
+
+For a listenable draft after all passages have been rendered and checked, run `python3 draft_audiobook.py --job /path/to/new-job --output /path/to/empty-output`. The draft uses raw generated audio for held passages, leaves their checkpoints held, and writes `draft_report.json` with their locations. It is separate from the verified `finish` and `verify` stages.
+
+To watch a running draft job, run `python3 live_book_progress.py --job /path/to/new-job --output /path/to/draft-output` and open `http://127.0.0.1:8765/`. The page reads saved checkpoints and refreshes every two seconds; the server binds to localhost.
 
 Repairs retain prior raw WAVs, recognition, checkpoints, and attempt evidence. For an ASR mistake confirmed by listening, save the actually heard transcript in a UTF-8 file and bind a deliberate review to that exact recording:
 
@@ -166,3 +170,40 @@ uvx mypy --python-executable .venv/bin/python studio.py voice_profiles.py projec
 ```
 
 Tests use fake tone generation and real audio encoding. They establish plumbing and verification behavior; automated recognition does not guarantee flawless pronunciation or replace listening review. No production speech generation is triggered by the default tests.
+
+### Supervised audiobook recovery
+
+`audiobook_pipeline.py --job JOB --output OUTPUT` runs isolated 20-passage workers,
+then checks and packages the draft. Each worker gets a separate local log under
+`JOB/worker-logs`. Recognized CUDA aborts restart in a fresh process with bounded
+backoff; five failures without progress stop for inspection. Identity errors and
+unknown failures stop immediately. The failure budget persists across supervisor
+restarts. After diagnosing a retry-limit failure, reset `failures` in
+`JOB/pipeline-status.json` while the service is stopped before resuming.
+
+Startup validates checkpoint evidence. Unreadable JSON is preserved under
+`JOB/recovery`; valid original attempts restore missing checkpoints, and passages
+without usable original metadata are regenerated without overwriting old audio.
+Valid JSON with mismatched hashes fails closed. Audio and checkpoint files are
+flushed before completion is recorded. `pipeline-status.json` supplies heartbeat,
+worker PID, failure details, and the current worker log. The progress page treats
+missing processes or expired heartbeats as stopped.
+
+The DDIA user-service template is in `config/systemd/voice-studio-ddia.service`.
+Install it under `~/.config/systemd/user`, reload systemd, and enable it. Enable
+user lingering with `loginctl enable-linger` for startup before login. Service
+exit code 2 requires inspection; unexpected supervisor failures have bounded
+systemd restarts. Stop with `systemctl --user stop voice-studio-ddia`. A `paused`
+marker in the job is respected; remove it before explicitly resuming.
+
+The service waits between GPU stages until GPU 0 has 6000 MiB free and utilization
+at most 35%. This is a conservative admission check, not a reservation: a game
+started during an active batch may still compete. No other application is stopped.
+Keep the existing frozen runtime settings when resuming; changing model/runtime
+versions requires a separate validated job. Synthetic crash-recovery tests are in
+`test_pipeline.py`; they do not establish the cause of a native CUDA fault.
+
+The companion `voice-studio-ddia-progress.service` serves the read-only dashboard
+at `http://127.0.0.1:8765/`, bound only to localhost. Install and enable its template
+in the same way. The page displays saved narration/check percentages separately
+from worker health, including GPU waiting and retries.

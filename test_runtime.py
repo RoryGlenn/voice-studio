@@ -53,12 +53,34 @@ class RuntimeChecks(unittest.TestCase):
             runtime.initialize(Path("/unused"))
             self.assertEqual(os.environ["MLX_USE_CUDA_GRAPHS"], "0")
             self.assertEqual(os.environ["MLX_CUDA_CONV_CACHE_SIZE"], "512")
+            os.environ["VOICE_STUDIO_CUDA_CONV_CACHE_SIZE"] = "2048"
+            runtime.initialize(Path("/unused"))
+            self.assertEqual(os.environ["MLX_CUDA_CONV_CACHE_SIZE"], "2048")
             mx.set_default_device.assert_called_with("gpu")
             mx.set_cache_limit.assert_called_with(0)
             mx.set_memory_limit.assert_called_with(4096 * 1024**2)
             mx.cuda.is_available.return_value = False
             with self.assertRaisesRegex(RuntimeError, "refusing CPU fallback"):
                 runtime.initialize(Path("/unused"))
+
+    def test_cuda_convolution_cache_override(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "VOICE_STUDIO_CONFIG": "/missing",
+                "VOICE_STUDIO_CUDA_CONV_CACHE_SIZE": "2048",
+            },
+            clear=True,
+        ):
+            self.assertEqual(runtime.settings()["cuda_conv_cache_size"], 2048)
+            self.assertEqual(
+                runtime.identity()["settings"]["cuda_conv_cache_size"], 2048
+            )
+            os.environ["VOICE_STUDIO_CUDA_CONV_CACHE_SIZE"] = "0"
+            with self.assertRaisesRegex(
+                ValueError, "cuda_conv_cache_size must be positive"
+            ):
+                runtime.settings()
 
     def test_lease_excludes_other_process_and_releases_after_error(self) -> None:
         with (
