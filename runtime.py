@@ -53,12 +53,20 @@ def settings() -> dict[str, Any]:
     )
     if memory <= 0:
         raise ValueError("runtime.memory_mib must be positive")
+    conv_cache = int(
+        os.environ.get(
+            "VOICE_STUDIO_CUDA_CONV_CACHE_SIZE",
+            values.get("cuda_conv_cache_size", 512),
+        )
+    )
+    if conv_cache <= 0:
+        raise ValueError("runtime.cuda_conv_cache_size must be positive")
     return {
         "backend": backend,
         "memory_mib": memory,
         "cuda_graphs": False,
         "cache_mib": 0,
-        "cuda_conv_cache_size": 512,
+        "cuda_conv_cache_size": conv_cache,
     }
 
 
@@ -118,7 +126,7 @@ def initialize(root: Path | None = None) -> Any:
     os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
     if options["backend"] == "cuda":
         os.environ["MLX_USE_CUDA_GRAPHS"] = "0"
-        os.environ["MLX_CUDA_CONV_CACHE_SIZE"] = "512"
+        os.environ["MLX_CUDA_CONV_CACHE_SIZE"] = str(options["cuda_conv_cache_size"])
     try:
         import mlx.core as mx
     except ImportError as exc:

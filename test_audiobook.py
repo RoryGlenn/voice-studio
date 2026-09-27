@@ -21,6 +21,7 @@ from PIL import Image
 import audiobook
 import book_package
 import book_prepare
+import draft_audiobook
 import runtime
 from book_pacing import RATE, dash_insertions, insert_pauses
 from doctor import file_hash
@@ -147,6 +148,31 @@ class AudiobookChecks(unittest.TestCase):
         self.assertTrue(white[20:31, icon_left : icon_left + 5].any())
         self.assertTrue(white[20:31, icon_right - 4 : icon_right + 1].any())
         self.assertTrue(evidence["headphone_icon"])
+
+    def test_recover_broken_checkpoint_preserves_existing_audio(self) -> None:
+        audiobook.render(self.job, self.plan, maximum=1, engine_factory=ToneEngine)
+        track = self.plan["tracks"][0]
+        path = audiobook.record_path(track, track["segments"][0], self.job)
+        original = json.loads(path.read_text())
+        path.write_text("")
+        audiobook.recover_checkpoints(self.job, self.plan)
+        self.assertEqual(json.loads(path.read_text()), original)
+        self.assertTrue(list((self.job / "recovery").rglob(path.name)))
+
+    def test_recover_broken_attempt_regenerates_only_damaged_passage(self) -> None:
+        audiobook.render(self.job, self.plan, maximum=2, engine_factory=ToneEngine)
+        track = self.plan["tracks"][0]
+        first = audiobook.record_path(track, track["segments"][0], self.job)
+        second = audiobook.record_path(track, track["segments"][1], self.job)
+        unchanged = second.read_bytes()
+        row = json.loads(first.read_text())
+        Path(row["raw_file"]).with_suffix(".json").write_text("")
+        audiobook.recover_checkpoints(self.job, self.plan)
+        self.assertFalse(first.exists())
+        audiobook.render(self.job, self.plan, maximum=1, engine_factory=ToneEngine)
+        self.assertEqual(second.read_bytes(), unchanged)
+        self.assertTrue(Path(row["raw_file"]).exists())
+        self.assertEqual(json.loads(first.read_text())["attempt"], row["attempt"] + 1)
 
     def test_mapping_resume_check_and_real_m4b(self) -> None:
         self.assertEqual(self.plan["title"], "Water Experiments")
@@ -343,6 +369,27 @@ class AudiobookChecks(unittest.TestCase):
         self.assertEqual(ToneEngine.calls, count)
         with self.assertRaisesRegex(ValueError, "Unresolved wording"):
             book_package.finish(self.plan, self.job, self.root / "exports")
+
+    def test_draft_export_keeps_held_checkpoint_and_decodes(self) -> None:
+        audiobook.render(self.job, self.plan, engine_factory=ToneEngine)
+        first = self.plan["tracks"][0]["segments"][0]
+
+        def recognize(path: Path, model: Path, workspace: Path) -> dict:
+            result = self.recognize(path, model, workspace)
+            if path.parent.parent.name == "0001" and path.stem.startswith("0001-"):
+                result["text"] = "Incorrect words"
+            return result
+
+        audiobook.check(self.job, self.plan, recognize)
+        first_path = audiobook.record_path(self.plan["tracks"][0], first, self.job)
+        saved = first_path.read_bytes()
+        report = draft_audiobook.finish_draft(self.job, self.root / "draft")
+        self.assertEqual(report["state"], "draft")
+        self.assertEqual(report["held_passages"], ["1/1"])
+        self.assertEqual(report["full_audio_decode"], "pass")
+        self.assertEqual(report["chapters"], 2)
+        self.assertEqual(first_path.read_bytes(), saved)
+        self.assertEqual(json.loads(saved)["status"], "needs_review")
 
     def test_changed_source_runtime_or_audio_cannot_be_reused(self) -> None:
         self.render_all()

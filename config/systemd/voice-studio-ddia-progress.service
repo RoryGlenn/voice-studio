@@ -1,0 +1,12 @@
+[Unit]
+Description=Local DDIA audiobook progress page
+StartLimitIntervalSec=600
+StartLimitBurst=3
+
+[Service]
+ExecStart=/usr/bin/python3 %h/repos/voice-studio/live_book_progress.py --job %h/repos/voice-studio/data/books/jobs/designing-data-intensive-applications-audio --output %h/repos/voice-studio/data/outputs/designing-data-intensive-applications-draft --port 8765
+Restart=on-failure
+RestartSec=15
+
+[Install]
+WantedBy=default.target
