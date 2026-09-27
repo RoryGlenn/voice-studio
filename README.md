@@ -78,3 +78,7 @@ models, and `local.toml` stay outside Git. Runtime data is private and local.
 The [development guide](docs/development.md#development-checks) lists the required
 Python, browser, lint, formatting, and type checks. [Documentation validation](docs/validation.md)
 records what has and has not been demonstrated.
+
+## Project layout
+
+Application code lives in `src/voice_studio/`, browser interfaces in `web/studio/` and `web/audiobook/`, tests in `tests/`, and older book-specific tools in `tools/legacy/`. Use `python3 run.py --help` for launch commands and `python3 run.py test` for the Python suite. Private jobs, recordings, and models stay in ignored runtime directories. See [development](docs/development.md) and the [audiobook workspace](docs/operations.md#use-the-audiobook-workspace).

@@ -7,8 +7,8 @@ Changes should preserve local inference, immutable source/voice identities, orig
 The browser submits text to `studio.py`, which validates it and serializes voice
 conditioning/generation through a worker. `runtime.py` selects the GPU, enforces
 local model use, and owns the shared cross-process GPU lease. Browser sessions
-and host/origin checks protect the local API; the separate progress server is
-read-only and loopback-bound.
+and host/origin checks protect the local API. The separate audiobook workspace
+is loopback-bound; its controls require a page token and job locks.
 
 For books, `book_prepare.py` freezes an EPUB plan; `audiobook.py` generates,
 checks, and repairs passages; `book_package.py` exports verified audio.
@@ -24,11 +24,16 @@ lock. Never edit fingerprints to make incompatible data appear resumable.
 
 ## Repository contents
 
-- `studio.py`, `web/`: local API, serialized render worker, and browser UI.
-- `render_book.py` and helper scripts: resume, recognition checks, repair, assembly, and output verification.
-- `higher_precision_book.py`, `new_b_book.py`: explicit saved-edition configuration and provenance.
-- `project_paths.py`, `run.py`: portable source/data separation and runtime selection.
-- `test_*.py`, `test_web.cjs`: synthetic fixtures, real FFmpeg export checks, API boundaries, and browser session recovery.
+- `src/voice_studio/`: application modules, GPU runtime, audiobook pipeline, and workspace HTTP API.
+- `web/studio/`: text-to-speech studio frontend.
+- `web/audiobook/`: audiobook overview, listening/review workspace, and system monitor.
+- `tests/`: Python fixtures/integration tests and JavaScript UI tests.
+- `tools/legacy/`: saved-edition workflows and historical book experiments. These remain available through `run.py book`, `book-new-b`, and `progress`.
+- `config/systemd/`: background-service templates; `docs/`: operating instructions.
+- `run.py`: stable launcher that selects the interpreter and sets checkout import paths.
+- Root `audiobook.py`, `audiobook_pipeline.py`, `draft_audiobook.py`, and `live_book_progress.py`: small compatibility entrypoints for existing services/job scripts. New commands should use `run.py`.
+
+Python modules import through `voice_studio`; the launcher adds `src/` to the child process import path. Private job paths are unchanged by source moves.
 
 Recordings, books, generated audio, model weights, caches, credentials, and `local.toml` are ignored by Git. Public examples contain no personal voice recordings or book text. Keep new experiment data under an ignored runtime directory.
 
@@ -48,11 +53,12 @@ from [installation](installation.md) when testing actual inference. Avoid rerunn
 ## Development checks
 
 ```sh
-uv run python -m unittest discover -p 'test_*.py'
-node --test test_web.cjs
+python3 run.py test
+node --test tests/test_web.cjs
+node tests/test_live_book_progress.cjs
 uvx ruff check .
 uvx ruff format --check .
-uvx mypy --python-executable .venv/bin/python studio.py voice_profiles.py project_paths.py run.py runtime.py doctor.py audiobook.py book_prepare.py book_pacing.py book_package.py
+uvx mypy --python-executable .venv/bin/python src/voice_studio/studio.py src/voice_studio/voice_profiles.py src/voice_studio/project_paths.py run.py src/voice_studio/runtime.py src/voice_studio/doctor.py src/voice_studio/audiobook.py src/voice_studio/book_prepare.py src/voice_studio/book_pacing.py src/voice_studio/book_package.py
 ```
 
 Tests use fake tone generation and real audio encoding. They establish plumbing and verification behavior; automated recognition does not guarantee flawless pronunciation or replace listening review. No production speech generation is triggered by the default tests.

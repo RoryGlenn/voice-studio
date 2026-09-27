@@ -2,6 +2,30 @@
 
 Use a foreground supervisor for short runs or a persistent user service for unattended work. This page describes general operation; exact commands for the existing book are in the [DDIA runbook](workstation-ddia.md).
 
+## Use the audiobook workspace
+
+Open the configured localhost dashboard (DDIA: `http://127.0.0.1:8765/`).
+
+- **Overview** separates narration, quality checks, packaging, and ready status. Chapter rows show saved passages and checked/flagged counts. **Listen** opens a passage selector and player; it advances to the next available passage in that chapter. Unchecked and flagged audio is explicitly labeled.
+- **Review** shows expected wording, the recognizer's transcript, and flag reasons. Click **Pause after passage**, wait for the paused state, then listen before recording a review. Enter the words actually heard and a note. Strict wording and timing validation still applies; an approval can leave a timing flag unresolved. **Regenerate passage** preserves previous attempts, renders only that passage, and checks it. The job remains paused until you choose **Resume conversion**.
+- **System** shows whole-machine CPU, per-core usage, GPU/VRAM, RAM/swap, top process names, worker health, and the latest worker log. Process CPU uses 100% per logical core. These are not audiobook-only resource readings.
+
+Updates use a local event stream every two seconds, with polling fallback. The job's `dashboard-history.json` retains up to one hour of sampled counts and CPU/GPU activity; recent history survives refreshes and service restarts. Estimates apply only to the active narration/checking stage and require steady observed progress. They exclude packaging.
+
+**Pause after passage** lets the current passage finish. A packaging operation may finish before it can pause. Resume uses the user service passed with `--service`; it does not launch a duplicate worker. Workspaces without that option are read-only for resume. Review actions hold both pipeline and checkpoint locks, use the configured local Python interpreter, and retain their requests and listening evidence under `dashboard-actions/` and the segment's review/history directories. No review decisions are inferred automatically.
+
+The download button appears only after a matching draft report records a successful full decode and the final M4B checksum matches. Reviewing/regenerating a completed job invalidates that download until the draft is rebuilt. A validated draft may still contain held passages.
+
+Example for an existing job and its own service:
+
+```sh
+python3 run.py workspace --job data/books/jobs/my-book \
+  --output data/outputs/my-book-draft --port 8766 \
+  --service voice-studio-my-book.service
+```
+
+All routes bind to loopback. Mutating requests require the local page's session token and same-origin checks. Audio routes resolve only known passages inside the selected job.
+
 ## Understand progress and recover from a stop
 
 The dashboard separates saved work from worker health:
@@ -54,6 +78,23 @@ passage counts; `pipeline-status.json` contains supervisor health. A saved
 
 Service exit code `2` requires attention rather than an automatic restart. Diagnose the failure before resetting a restart limit with `systemctl --user reset-failed UNIT`. Replace `UNIT` with your service name.
 
+## Tune worker throughput
+
+Use `--render-batch-size` and `--check-batch-size` on `audiobook_pipeline.py`
+to choose how many new passages each process handles. The defaults are 20 and
+50 respectively. The supplied DDIA service template selects 50 for both.
+Larger rendering batches spread model loading and checkpoint
+validation over more audio, but wait longer before yielding the GPU to other
+applications. Every completed passage is still saved immediately. If longer
+workers encounter repeated CUDA errors, reduce the rendering batch to 20.
+
+Checking workers reuse Whisper weights across passages, without using an earlier
+passage's transcript as context. They release the model on completion or failure;
+new workers start fresh. Standalone `python3 run.py audiobook check --job PATH --max-segments 50`
+also limits new checks to 50. Omitting that limit checks all remaining rendered passages.
+Model, voice, decoding settings, and checkpoint validation are unchanged by these
+batch controls.
+
 ## Install a background job on Ubuntu
 
 This example creates **new** units for the `my-book` job from the
@@ -69,7 +110,7 @@ Create both units without overwriting existing files:
 python3 - <<'PY'
 from pathlib import Path
 repo = Path.cwd().resolve()
-if not (repo / 'audiobook_pipeline.py').is_file():
+if not (repo / 'src/voice_studio/audiobook_pipeline.py').is_file():
     raise SystemExit('Run from the Voice Studio repository root')
 # Keep systemd specifier/quoting handling explicit rather than guessing escaping.
 if any(ch in str(repo) for ch in ' %"\\\n'):
