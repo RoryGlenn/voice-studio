@@ -8,7 +8,7 @@ Type=simple
 WorkingDirectory=%h/repos/voice-studio
 Environment=VOICE_STUDIO_CUDA_CONV_CACHE_SIZE=2048
 Environment=VOICE_STUDIO_MIN_FREE_GPU_MIB=6000
-ExecStart=%h/repos/voice-studio/.venv/bin/python %h/repos/voice-studio/audiobook_pipeline.py --job %h/repos/voice-studio/data/books/jobs/designing-data-intensive-applications-audio --output %h/repos/voice-studio/data/outputs/designing-data-intensive-applications-draft
+ExecStart=%h/repos/voice-studio/.venv/bin/python %h/repos/voice-studio/run.py pipeline --job %h/repos/voice-studio/data/books/jobs/designing-data-intensive-applications-audio --output %h/repos/voice-studio/data/outputs/designing-data-intensive-applications-draft --render-batch-size 50 --check-batch-size 50
 Restart=on-failure
 RestartPreventExitStatus=2
 RestartSec=15

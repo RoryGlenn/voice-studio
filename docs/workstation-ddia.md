@@ -75,3 +75,20 @@ The same directory contains chapter audio, `Listen in order.m3u8`, and
 review. Narration reaching 100% alone does not mean packaging has finished.
 
 For errors and retry limits, see [troubleshooting](operations.md#understand-progress-and-recover-from-a-stop).
+
+## Worker throughput
+
+The DDIA service uses 50-passage rendering and checking workers. Each passage
+is checkpointed immediately. On this workstation, a 50-passage rendering trial
+took 262 seconds, including 236 seconds of generation; all prior checkpoints
+were unchanged. Recent 20-passage workers used about 20 seconds of overhead per
+batch, compared with 27 seconds for the 50-passage trial. Passage lengths vary,
+so this is an overhead comparison rather than a promised whole-book duration.
+
+A warmed six-passage Whisper comparison (82 seconds of audio) took 4.94 seconds
+with per-passage model loading and 2.58 seconds with reused weights. Transcripts
+and word timings matched exactly in that sample. This measures recognition,
+not total checking time, which also includes startup and checkpoint validation.
+A full native 50-passage checking batch also completed successfully in 35.4 seconds,
+including startup and checkpoint writes.
+See [worker tuning](operations.md#tune-worker-throughput) for controls and tradeoffs.

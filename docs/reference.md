@@ -88,18 +88,23 @@ Inspect `--help` for the full current argument list. `audiobook` commands requir
 | `python3 run.py audiobook resume` | Remove the pause marker and render; does not start the supervisor or run all later stages. |
 | `python3 run.py audiobook pause` | Request a stop between passages. |
 | `python3 run.py audiobook recover` | Validate/recover checkpoints while holding the job lock; normally run by the supervisor. |
-| `python3 run.py audiobook check` | Transcribe rendered passages and apply checks. |
+| `python3 run.py audiobook check` | Transcribe rendered passages and apply checks; optional positive `--max-segments` limits newly checked passages. |
 | `python3 run.py audiobook review` | List held passages; `--segment`, `--transcript`, and `--note` bind a listening review. |
 | `python3 run.py audiobook repair` | Regenerate an explicitly held `--segment TRACK/PASSAGE` with positive `--seed-offset`, then check. |
 | `python3 run.py audiobook finish` | Export verified passages; `--output` defaults to `JOB/exports`. |
 | `python3 run.py audiobook verify` | Verify the saved final export. |
-| `.venv/bin/python audiobook_pipeline.py --job PATH --output PATH` | Supervise recovery, generation, checking, and draft packaging. |
-| `.venv/bin/python draft_audiobook.py --job PATH --output PATH` | Package checked passages as a draft, retaining held status. |
-| `python3 live_book_progress.py --job PATH --output PATH --port 8766` | Serve localhost-only progress; default port is 8765. |
+| `python3 run.py pipeline --job PATH --output PATH` | Supervise recovery, generation, checking, and draft packaging. |
+| `python3 run.py draft --job PATH --output PATH` | Package checked passages as a draft, retaining held status. |
+| `python3 run.py workspace --job PATH --output PATH --port 8766 --service UNIT` | Serve localhost-only progress; default port is 8765. |
 
-Supervisor batch size 20, retry limit 5 without progress, backoff from 3 up to 60
-seconds, 15-minute progress timeout, and six-hour packaging cap are implementation
-defaults. They are **not CLI flags**. The CLI exposes only `--job` and `--output`.
+Supervisor flags `--render-batch-size` (default 20) and `--check-batch-size`
+(default 50) set the maximum new passages per worker. Both require positive
+integers. Recognition reuses Whisper weights within each checking worker while
+keeping each passage independent, then releases the model when the worker exits.
+
+The retry limit of 5 without progress, backoff from 3 up to 60 seconds, 15-minute
+progress timeout, and six-hour packaging cap are implementation defaults, not CLI
+flags.
 Recognized retry strings are `illegal memory access` and `Cache thrashing`.
 Unknown errors stop. See [operations](operations.md).
 

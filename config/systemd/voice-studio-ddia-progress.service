@@ -4,7 +4,7 @@ StartLimitIntervalSec=600
 StartLimitBurst=3
 
 [Service]
-ExecStart=/usr/bin/python3 %h/repos/voice-studio/live_book_progress.py --job %h/repos/voice-studio/data/books/jobs/designing-data-intensive-applications-audio --output %h/repos/voice-studio/data/outputs/designing-data-intensive-applications-draft --port 8765
+ExecStart=/usr/bin/python3 %h/repos/voice-studio/run.py workspace --job %h/repos/voice-studio/data/books/jobs/designing-data-intensive-applications-audio --output %h/repos/voice-studio/data/outputs/designing-data-intensive-applications-draft --port 8765 --service voice-studio-ddia.service
 Restart=on-failure
 RestartSec=15
 
