@@ -6,6 +6,13 @@ The website accepts text, previews or renders it, and exposes speed, paragraph p
 
 New WAV downloads preserve the model's native 24 kHz audio as uncompressed 24-bit PCM. MP3 remains available for smaller files. Extra export bit depth preserves precision; it does not create higher-frequency detail or guarantee more natural synthesis.
 
+## Run narration yourself
+
+Start with the [step-by-step narration guide](docs/running-narration.md). It covers
+pasted text, the configured DDIA service, a new EPUB, progress, outputs, and recovery.
+AI speech generation and recognition run locally using installed models; Python
+coordinates the job. No Codex session is required to keep it running.
+
 ## Existing installation
 
 The ignored `local.toml` selects your existing Python environment, voice profile, model cache, and audiobook workspace. Media stays in its current location. From this repository:
@@ -13,10 +20,9 @@ The ignored `local.toml` selects your existing Python environment, voice profile
 ```sh
 python3 run.py studio
 python3 run.py studio --port 53648 --no-browser
-python3 run.py progress
-python3 run.py book verify
 ```
 
+On Ubuntu, `./launch-voice-studio.sh` opens the configured browser interface.
 On macOS, double-click `Launch Voice Studio.command` to open the website. Its launch URL contains the current local session token; use that URL when opening another browser. The token is stored only in the private runtime state. The server binds to `127.0.0.1` and is started on demand.
 
 The old and extracted launchers use the same instance lock when configured with the same Studio data directory. If the existing server is already running, launching here reopens that instance. To switch to the extracted server, finish any active render and quit the existing server first. The existing installation and completed audiobooks are preserved.
@@ -113,7 +119,7 @@ Preparation preserves source locations, paragraph and heading roles, an omission
 python3 run.py audiobook repair --job /path/to/new-job --segment 1/3 --seed-offset 1000
 ```
 
-For a listenable draft after all passages have been rendered and checked, run `python3 draft_audiobook.py --job /path/to/new-job --output /path/to/empty-output`. The draft uses raw generated audio for held passages, leaves their checkpoints held, and writes `draft_report.json` with their locations. It is separate from the verified `finish` and `verify` stages.
+For a listenable draft after all passages have been rendered and checked, run `.venv/bin/python draft_audiobook.py --job /path/to/new-job --output /path/to/empty-output`. The draft uses raw generated audio for held passages, leaves their checkpoints held, and writes `draft_report.json` with their locations. It is separate from the verified `finish` and `verify` stages.
 
 To watch a running draft job, run `python3 live_book_progress.py --job /path/to/new-job --output /path/to/draft-output` and open `http://127.0.0.1:8765/`. The page reads saved checkpoints and refreshes every two seconds; the server binds to localhost.
 
@@ -143,6 +149,15 @@ Choose an empty output directory; finalization refuses to overwrite a directory 
 
 `python3 run.py book` dispatches the existing higher-precision edition wrapper. Its actions are `render`, `adjudicate`, `repair`, `audit`, `finalize`, and `verify`. Use `render --plan-only` to inspect the prepared plan without generating speech. `book-new-b` addresses the older 4-bit edition.
 
+The historical edition has its own progress and verification commands:
+
+```sh
+python3 run.py progress
+python3 run.py book verify
+```
+
+These commands do not report on the generic EPUB jobs or the DDIA service.
+
 This workflow is specifically the existing 30-track, nine-folder *Thinking in Systems* recipe. It requires the externally prepared `work/narration_text/spoken_manifest.json`, `work/book_subsections.json`, source text paths, frozen voice profile, and model assets. It does not import arbitrary EPUBs or recreate the original chapter inventories. These inputs and historical jobs are data, not repository fixtures.
 
 Run render, recognition, repair, and finalization stages sequentially. Studio and book inference share a user-level GPU lock; a competing process exits with a busy error. Generation models are released before recognition. Repair and adjudication helpers must not run concurrently with the renderer. Repairs retain source wording and their evidence; finalization accepts only verified checkpoints with matching identities and intact audio.
@@ -171,9 +186,9 @@ uvx mypy --python-executable .venv/bin/python studio.py voice_profiles.py projec
 
 Tests use fake tone generation and real audio encoding. They establish plumbing and verification behavior; automated recognition does not guarantee flawless pronunciation or replace listening review. No production speech generation is triggered by the default tests.
 
-### Supervised audiobook recovery
+## Supervised audiobook recovery
 
-`audiobook_pipeline.py --job JOB --output OUTPUT` runs isolated 20-passage workers,
+`.venv/bin/python audiobook_pipeline.py --job JOB --output OUTPUT` runs isolated 20-passage workers,
 then checks and packages the draft. Each worker gets a separate local log under
 `JOB/worker-logs`. Recognized CUDA aborts restart in a fresh process with bounded
 backoff; five failures without progress stop for inspection. Identity errors and
@@ -188,6 +203,9 @@ Valid JSON with mismatched hashes fails closed. Audio and checkpoint files are
 flushed before completion is recorded. `pipeline-status.json` supplies heartbeat,
 worker PID, failure details, and the current worker log. The progress page treats
 missing processes or expired heartbeats as stopped.
+
+For start/stop commands and the configured output path, see
+[control the configured DDIA audiobook](docs/running-narration.md#control-the-configured-ddia-audiobook).
 
 The DDIA user-service template is in `config/systemd/voice-studio-ddia.service`.
 Install it under `~/.config/systemd/user`, reload systemd, and enable it. Enable
