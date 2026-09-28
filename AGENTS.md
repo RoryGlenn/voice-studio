@@ -1,15 +1,35 @@
-# Voice Studio contributor guidance
+# Repository Guidelines
 
-- Put application code in `src/voice_studio/`, frontend assets in the appropriate `web/studio/` or `web/audiobook/` directory, tests in `tests/`, and historical experiments in `tools/legacy/`.
-- Use `run.py` as the stable launcher. Preserve compatibility entrypoints while saved job scripts or running supervisors use them. Do not relocate private `data/` jobs during source refactors.
-- Read `docs/development.md` and the relevant operating guide before modifying a workflow. Use the Doc Agent skill for documentation changes.
-- Inspect active worker state before restarting services. The progress/workspace service can restart independently of the audiobook worker.
-- Keep book text, audio, models, and process information local. Never bypass job identities, GPU/checkpoint locks, or strict review evidence. Preserve original audio attempts.
-- Validate with `python3 run.py test`, `node --test tests/test_web.cjs`, and `node tests/test_live_book_progress.cjs`; follow the lint/type checks in `docs/development.md`. Test review mutations with synthetic fixtures, not automatic decisions on the user's book.
+## Project Structure
 
-## Dashboard as the default workspace
+Application modules live in `src/voice_studio/`; browser assets in `web/studio/` and `web/audiobook/`; tests in `tests/`; service templates in `config/systemd/`; historical experiments in `tools/legacy/`. Use `run.py` as the stable launcher. Preserve compatibility entrypoints and private job locations during refactors.
 
-- For every Voice Studio task, including audiobook rendering, diagnostics, development, and maintenance, ensure the local audiobook workspace site is running. Reuse a healthy existing instance; start the appropriate dashboard service if it is stopped. Verify its HTTP response and current job state, and give the user its local URL.
-- For the configured DDIA job, the dashboard service is `voice-studio-ddia-progress.service` and the URL is `http://127.0.0.1:8765/`. Consult `docs/operations.md` for other jobs; associate each dashboard with the correct job and output directory rather than showing an unrelated book as current work.
-- Keep the site available throughout long-running work. Starting the dashboard does not authorize starting, resuming, or restarting narration; preserve the worker's existing state unless the task requires a change.
-- As project workflows evolve, proactively maintain useful dashboard information and controls within the authorized task: accurate stages, progress, review explanations, diagnostics, and actionable errors. Prefer focused improvements grounded in real work; verify changes and keep all data local. Ask about unresolved product choices or substantial scope expansions.
+## Development Commands and Style
+
+Use Python 3.12, uv, Node, and FFmpeg/ffprobe. Follow [installation](docs/installation.md) for platform-specific inference dependencies.
+
+- `python3 run.py studio`: launch the local narration interface.
+- `python3 run.py test`: discover Python `unittest` tests named `test_*.py`.
+- `node --test tests/test_web.cjs`: test Studio browser behavior.
+- `node tests/test_live_book_progress.cjs`: test audiobook monitoring and review behavior.
+- `uvx ruff check .` and `uvx ruff format --check .`: check Python lint and formatting.
+
+Use four-space Python indentation, `snake_case` functions/modules, and `PascalCase` classes. Follow surrounding JavaScript conventions. Read [development](docs/development.md) and applicable operating guides before workflow changes; development includes the mypy command. Use Doc Agent for documentation work.
+
+## Validation
+
+For code changes, run the tests above, Ruff, and mypy; verify the affected user flow. Use synthetic fixtures for review mutations, never automatic decisions on a user's book. Mock speech tests do not establish narration quality; no numeric coverage threshold is configured.
+
+For documentation-only changes, verify commands, links, and accuracy. For local configuration changes, validate the saved configuration and live behavior; run broader tests when runtime logic changes. Report checks performed and limitations.
+
+## Private Data and Runtime Safety
+
+Keep books, recordings, models, and process information local. `data/` and `local.toml` are Git-ignored; never force-add private configuration or credentials. Restart idle Studio after profile changes; existing jobs retain frozen identities. Never bypass job identities, GPU/checkpoint locks, or review evidence. Preserve original attempts.
+
+Keep the correct job's dashboard available for every task; reuse healthy instances, verify HTTP/state, and provide its URL. DDIA uses `voice-studio-ddia-progress.service` at <http://127.0.0.1:8765/>. Inspect worker state before service changes; starting the dashboard does not authorize narration. Improve dashboard information within scope; see [operations](docs/operations.md). Ask about unresolved product decisions or substantial scope expansions.
+
+## Commits and Pull Requests
+
+Use concise imperative commit subjects, such as “Simplify audiobook overview progress cards.” PRs should explain the problem, resulting behavior, validation, relevant issue links, and screenshots for visual changes.
+
+Issue creation, commit, push, PR creation, and merge require distinct authorization. “Take this from issue to merge” authorizes the complete workflow, including finding/creating a scoped issue. Honor required CI, reviews, and branch protections; verify the final remote state.
