@@ -47,8 +47,6 @@ function show(data) {
   $('eta').textContent = data.download_ready ? 'Ready' : data.remaining === 0 && data.state !== 'checking' ? 'Narration complete' : duration(data.estimate_seconds);
   $('pace').textContent = data.estimate_seconds == null ? 'Waiting for 1 minute of steady progress' : 'Current stage only · packaging excluded';
   $('last-save').textContent = `Last save ${age(data.saved_age_seconds)}`;
-  const load = data.activity || {}; const gpu = load.gpu || {};
-  $('compact-load').textContent = `${load.cpu_percent == null ? '—' : Math.round(load.cpu_percent)}% CPU · ${gpu.utilization == null ? '—' : Math.round(gpu.utilization)}% GPU`;
   SystemMonitor.update(data);
   const phase = data.download_ready ? 3 : data.state === 'packaging' ? 2 : data.remaining === 0 ? 1 : 0;
   ['rendering','checking','packaging','complete'].forEach((name,i)=>{const el=$('step-'+name);el.classList.toggle('active',i===phase);el.classList.toggle('done',i<phase);});
