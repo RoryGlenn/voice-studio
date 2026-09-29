@@ -11,6 +11,7 @@ import threading
 import time
 from pathlib import Path
 
+from voice_studio.workspace_eta import Estimator
 from voice_studio.workspace_insights import insights, wording_diff
 
 REPO = Path(__file__).resolve().parents[2]
@@ -31,6 +32,7 @@ class Workspace:
             service,
         )
         self.plan = json.loads((job / "plan.json").read_text())
+        self.estimator = Estimator(job, self.plan)
         self.segments = {
             f"{t['track']}/{s['number']}": (t, s)
             for t in self.plan["tracks"]
@@ -123,6 +125,7 @@ class Workspace:
             data["state"], data["stage"] = "paused", "Paused"
         chapters, review, recent = [], [], []
         audio_seconds = 0
+        pending_words = 0
         for track in self.plan["tracks"]:
             chapter = {
                 "number": track["track"],
@@ -138,6 +141,7 @@ class Workspace:
                 key = f"{track['track']}/{segment['number']}"
                 row = self.record(key)
                 if not row:
+                    pending_words += len(segment.get("text", "").split())
                     continue
                 chapter["generated"] += 1
                 chapter["checked"] += row["status"] in ("verified", "needs_review")
@@ -204,23 +208,7 @@ class Workspace:
             ]
             atomic(self.history_path, self.history)
             self.last_history = now
-        phase_key = "generated" if data["state"] == "rendering" else "checked"
-        stable = []
-        for h in reversed(self.history):
-            if (
-                h["state"] != data["state"]
-                or now - h["at"] > 300
-                or (stable and stable[-1]["at"] - h["at"] > 20)
-            ):
-                break
-            stable.append(h)
-        estimate = None
-        if data["state"] in ("rendering", "checking") and stable:
-            oldest = stable[-1]
-            elapsed = now - oldest["at"]
-            gained = data[phase_key] - oldest[phase_key]
-            if elapsed >= 60 and gained >= 3:
-                estimate = (data["total"] - data[phase_key]) * elapsed / gained
+        forecast = self.estimator.forecast(data, pending_words)
         ready = self.final_ready(data["state"])
         data.update(insights(self.job, self.output, data, ready))
         data.update(
@@ -240,7 +228,7 @@ class Workspace:
             recent=sorted(recent, key=lambda r: r["at"], reverse=True)[:8],
             audio_seconds=audio_seconds,
             history=self.history,
-            estimate_seconds=estimate,
+            **forecast,
             pause_requested=(self.job / "paused").exists(),
             download_ready=ready,
             action=dict(self.action),

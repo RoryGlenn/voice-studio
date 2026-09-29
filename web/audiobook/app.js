@@ -13,7 +13,47 @@ themeSelect.addEventListener('change', () => {
 document.querySelector('.cover').src = route('/cover');
 $('download').href = route('/download');
 
-const duration = seconds => seconds == null ? 'Measuring…' : seconds < 60 ? 'Under 1 min' : seconds < 3600 ? `${Math.ceil(seconds / 60)} min` : `${(seconds / 3600).toFixed(1)} hr`;
+const duration = seconds => {
+  if (!Number.isFinite(seconds) || seconds < 0) return 'Measuring…';
+  if (seconds < 60) return 'Under 1 min';
+  if (seconds < 3600) return `${Math.ceil(seconds / 60)} min`;
+  if (seconds < 86400) return `${(seconds / 3600).toFixed(1)} hr`;
+  const hours = Math.ceil(seconds / 3600);
+  const days = Math.floor(hours / 24);
+  return `${days} ${days === 1 ? 'day' : 'days'}${hours % 24 ? ` ${hours % 24} hr` : ''}`;
+};
+function showEstimate(data) {
+  const checking = data.state === 'checking';
+  $('estimate-label').textContent = 'Estimated time remaining';
+  $('eta-finish').textContent = '';
+  $('eta-range').textContent = '';
+  if (data.download_ready) {
+    $('eta').textContent = 'Ready';
+    $('pace').textContent = 'Draft validated and ready to download';
+    return;
+  }
+  if (data.state === 'packaging') {
+    $('eta').textContent = 'Packaging';
+    $('pace').textContent = 'Narration and checks complete · validating final files';
+    return;
+  }
+  if (data.pause_requested || !['rendering','checking'].includes(data.state)) {
+    $('eta').textContent = data.state === 'paused' ? 'Paused' : 'Waiting';
+    $('pace').textContent = 'Estimate resumes when steady progress returns';
+    return;
+  }
+  const seconds = data.estimate_seconds;
+  $('eta').textContent = duration(seconds);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    const finish = new Date(data.observed_at * 1000 + seconds * 1000);
+    $('eta-finish').textContent = `Around ${finish.toLocaleString(undefined, {weekday:'short', month:'short', day:'numeric', hour:'numeric', minute:'2-digit'})}`;
+    $('eta-range').textContent = data.estimate_low_seconds == null ? '' : `Typical range: ${duration(data.estimate_low_seconds)} – ${duration(data.estimate_high_seconds)}`;
+    $('pace').textContent = `${data.estimate_batches} completed batches · ${checking ? 'packaging still follows' : 'adjusted for text length; checks and packaging still follow'}`;
+  } else {
+    $('pace').textContent = 'Measuring pace · needs 8 completed batches and 10 minutes of work';
+  }
+}
+
 const age = seconds => seconds < 5 ? 'just now' : seconds < 60 ? `${Math.floor(seconds)}s ago` : `${Math.floor(seconds / 60)}m ago`;
 const escapeHtml = text => String(text ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function setView(name) {
@@ -43,9 +83,8 @@ function show(data) {
   $('render-bar').value = data.render_percent;
   $('remaining').textContent = `${data.remaining.toLocaleString()} passages left`;
   $('audio-duration').textContent = `${(data.audio_seconds / 3600).toFixed(1)} hours`;
-  $('estimate-label').textContent = data.state === 'checking' ? 'Quality-check time remaining' : 'Narration time remaining';
-  $('eta').textContent = data.download_ready ? 'Ready' : data.remaining === 0 && data.state !== 'checking' ? 'Narration complete' : duration(data.estimate_seconds);
-  $('pace').textContent = data.estimate_seconds == null ? 'Waiting for 1 minute of steady progress' : 'Current stage only · packaging excluded';
+  $('elapsed').textContent = data.elapsed_seconds == null ? 'Unavailable' : duration(data.elapsed_seconds);
+  showEstimate(data);
   $('last-save').textContent = `Last save ${age(data.saved_age_seconds)}`;
   SystemMonitor.update(data);
   const phase = data.download_ready ? 3 : data.state === 'packaging' ? 2 : data.remaining === 0 ? 1 : 0;
