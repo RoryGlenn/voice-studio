@@ -2,8 +2,46 @@
 
 import difflib
 import json
+import math
 import re
 import shutil
+
+
+def elapsed_time(job, data, rows):
+    """Wall time from first recorded work, including pauses and restart downtime."""
+    starts = []
+    history = job / "worker-history.jsonl"
+    if history.exists():
+        with history.open() as handle:
+            for line in handle:
+                try:
+                    start = float(json.loads(line)["started_at"])
+                    if math.isfinite(start) and start > 0:
+                        starts.append(start)
+                        break
+                except (ValueError, KeyError, TypeError):
+                    continue
+    # Logs exist before a batch finishes, including batches interrupted by reboot.
+    for log in (job / "worker-logs").glob("*.log"):
+        stamp = log.name.split("-", 1)[0]
+        if stamp.isdigit() and len(stamp) == 19:
+            starts.append(int(stamp) / 1e9)
+    now = data.get("observed_at")
+    if not starts or now is None:
+        return {"elapsed_seconds": None, "started_at": None}
+    start = min(starts)
+    end = now
+    if data["state"] == "complete":
+        finishes = [
+            row["finished_at"]
+            for row in rows
+            if isinstance(row.get("finished_at"), (int, float))
+            and math.isfinite(row["finished_at"])
+        ]
+        if not finishes:
+            return {"elapsed_seconds": None, "started_at": start}
+        end = max(finishes)
+    return {"elapsed_seconds": max(0, end - start), "started_at": start}
 
 
 def insights(job, output, data, ready):
@@ -55,6 +93,7 @@ def insights(job, output, data, ready):
                 except ValueError:
                     continue
     return {
+        **elapsed_time(job, data, rows),
         "completion": completion,
         "alerts": alerts,
         "disk_free_gib": round(free / 1024**3, 1),

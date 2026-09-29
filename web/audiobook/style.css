@@ -50,3 +50,5 @@
   .topbar {align-items:flex-start;flex-wrap:wrap;padding:16px 18px}
   .topbar-controls {width:100%;justify-content:space-between;gap:12px}
 }
+
+.elapsed-time{margin-top:18px;padding-top:14px;border-top:1px solid var(--border)}
